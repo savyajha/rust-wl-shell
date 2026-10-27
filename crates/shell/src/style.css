@@ -1,0 +1,45 @@
+/* The bar: macOS's dark menu bar, a translucent tint over the compositor's blur, with white
+   text. The sizes are variables, set on window.bar from the config (main.rs). */
+
+window.bar {
+  background-color: rgba(0, 0, 0, 0.35);
+  color: white;
+  font-size: var(--font-size);
+  min-height: var(--height);
+  padding: 0 var(--spacing);
+}
+
+window.bar .left {
+  border-spacing: var(--spacing);
+}
+
+window.bar image {
+  -gtk-icon-size: var(--icon-size);
+}
+
+/* A workspace: a dot, filled when it is shown on its output. The button is as tall as the
+   bar and a little wider than its dot, so the dot is easy to hit. */
+window.bar button.workspace {
+  all: unset;
+  padding: 0 calc(var(--spacing) / 4);
+}
+
+window.bar button.workspace > .dot {
+  min-width: var(--dot-size);
+  min-height: var(--dot-size);
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+window.bar button.workspace:hover > .dot {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+window.bar button.workspace.active > .dot {
+  background-color: white;
+  box-shadow: none;
+}
+
+window.bar .app {
+  font-weight: 600;
+}

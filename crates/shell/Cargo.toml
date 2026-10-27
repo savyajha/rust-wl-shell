@@ -1,0 +1,22 @@
+[package]
+name = "rust-wl-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+gio-unix = "0.22"
+gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
+gtk4 = { version = "0.11", features = ["v4_20"] }
+gtk4-layer-shell = "0.8"
+relm4 = { version = "0.11", default-features = false, features = ["macros"] }
+rust-wl-shell-core.workspace = true
+tokio = { version = "1", features = ["sync"] }
+tracing.workspace = true
+tracing-subscriber = "0.3"
+wayland-client = "0.31"
+# dlopen: libwayland-client is not linked by this binary, so gtk4-layer-shell stays ahead of it
+# in the lookup order, as that library requires.
+wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }

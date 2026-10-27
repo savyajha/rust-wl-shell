@@ -1,0 +1,25 @@
+{"WorkspacesChanged":{"workspaces":[{"id":1,"idx":1,"name":null,"output":"winit","is_urgent":false,"is_active":true,"is_focused":true,"active_window_id":null}]}}
+{"WindowsChanged":{"windows":[]}}
+{"KeyboardLayoutsChanged":{"keyboard_layouts":{"names":["English (US)"],"current_idx":0}}}
+{"OverviewOpenedOrClosed":{"is_open":false}}
+{"ConfigLoaded":{"failed":false}}
+{"CastsChanged":{"casts":[]}}
+{"KeyboardLayoutsChanged":{"keyboard_layouts":{"names":["English (US)"],"current_idx":0}}}
+{"WorkspacesChanged":{"workspaces":[{"id":1,"idx":1,"name":null,"output":"winit","is_urgent":false,"is_active":true,"is_focused":true,"active_window_id":2},{"id":2,"idx":2,"name":null,"output":"winit","is_urgent":false,"is_active":false,"is_focused":false,"active_window_id":null}]}}
+{"WindowOpenedOrChanged":{"window":{"id":2,"title":"Alpha","app_id":"test.alpha","pid":486505,"workspace_id":1,"is_focused":true,"is_floating":false,"is_urgent":false,"layout":{"pos_in_scrolling_layout":[1,1],"tile_size":[611.0,1341.0],"window_size":[611,1341],"tile_pos_in_workspace_view":null,"window_offset_in_tile":[0.0,0.0]},"focus_timestamp":{"secs":21590,"nanos":175871009}}}}
+{"WorkspaceActiveWindowChanged":{"workspace_id":1,"active_window_id":3}}
+{"WindowOpenedOrChanged":{"window":{"id":3,"title":"Beta","app_id":"test.beta","pid":486534,"workspace_id":1,"is_focused":true,"is_floating":false,"is_urgent":false,"layout":{"pos_in_scrolling_layout":[2,1],"tile_size":[611.0,1341.0],"window_size":[611,1341],"tile_pos_in_workspace_view":null,"window_offset_in_tile":[0.0,0.0]},"focus_timestamp":{"secs":21591,"nanos":220965456}}}}
+{"WorkspaceActiveWindowChanged":{"workspace_id":1,"active_window_id":2}}
+{"WindowFocusChanged":{"id":2}}
+{"WorkspaceActivated":{"id":2,"focused":true}}
+{"WindowFocusChanged":{"id":null}}
+{"WindowFocusTimestampChanged":{"id":2,"focus_timestamp":{"secs":21592,"nanos":160332768}}}
+{"WorkspaceActivated":{"id":1,"focused":true}}
+{"WindowFocusChanged":{"id":2}}
+{"WorkspaceActiveWindowChanged":{"workspace_id":1,"active_window_id":3}}
+{"WindowFocusChanged":{"id":3}}
+{"WindowLayoutsChanged":{"changes":[[3,{"pos_in_scrolling_layout":[1,1],"tile_size":[611.0,1341.0],"window_size":[611,1341],"tile_pos_in_workspace_view":null,"window_offset_in_tile":[0.0,0.0]}]]}}
+{"WindowClosed":{"id":2}}
+{"WorkspaceActiveWindowChanged":{"workspace_id":1,"active_window_id":null}}
+{"WindowClosed":{"id":3}}
+{"WindowFocusChanged":{"id":null}}

@@ -1,0 +1,16 @@
+[workspace]
+members = ["crates/core", "crates/shell"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+tracing = "0.1"
+rust-wl-shell-core = { path = "crates/core" }
+
+[profile.release]
+lto = "thin"
