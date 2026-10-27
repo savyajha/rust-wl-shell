@@ -6,6 +6,7 @@ use std::time::Duration;
 use chrono::{Local, Timelike};
 use futures_lite::StreamExt;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 use tokio::time;
 use tracing::warn;
 use zbus::proxy;
@@ -23,11 +24,16 @@ trait LogindManager {
 }
 
 /// How long logind gets to answer before the clock goes without its resume signal.
-const BUS_TIMEOUT: Duration = Duration::from_secs(2);
+const LOGIND_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Send the clock's text until `updates` closes. An NTP step or a time zone change while
-/// awake shows only at the next minute, up to a minute late.
-pub async fn run(format: String, updates: UnboundedSender<Update>) {
+/// Send the clock's text until `updates` closes, waking also on logind's resume signal once
+/// `bus` gives the system bus. An NTP step or a time zone change while awake shows only at
+/// the next minute, up to a minute late.
+pub async fn run(
+    format: String,
+    updates: UnboundedSender<Update>,
+    bus: oneshot::Receiver<Option<zbus::Connection>>,
+) {
     let send = || {
         let text = Local::now().format(&format).to_string();
         updates.send(Update::Clock(text)).is_ok()
@@ -36,16 +42,20 @@ pub async fn run(format: String, updates: UnboundedSender<Update>) {
     if !send() {
         return;
     }
-    let mut resumes = match time::timeout(BUS_TIMEOUT, resumes()).await {
-        Ok(Ok(resumes)) => Some(resumes),
-        Ok(Err(e)) => {
-            warn!("no resume signal from logind ({e}); the clock may lag after a suspend");
-            None
-        }
-        Err(_) => {
-            warn!("no resume signal: logind did not answer; the clock may lag after a suspend");
-            None
-        }
+    let mut resumes = match bus.await {
+        Ok(Some(bus)) => match time::timeout(LOGIND_TIMEOUT, resumes(&bus)).await {
+            Ok(Ok(resumes)) => Some(resumes),
+            Ok(Err(e)) => {
+                warn!("no resume signal from logind ({e}); the clock may lag after a suspend");
+                None
+            }
+            Err(_) => {
+                warn!("no resume signal: logind did not answer; the clock may lag after a suspend");
+                None
+            }
+        },
+        // The core warned that there is no system bus.
+        _ => None,
     };
     // Sent again at once: connecting to the bus may have taken past a minute's start.
     while send() {
@@ -62,9 +72,8 @@ pub async fn run(format: String, updates: UnboundedSender<Update>) {
     }
 }
 
-async fn resumes() -> zbus::Result<PrepareForSleepStream> {
-    let bus = zbus::Connection::system().await?;
-    LogindManagerProxy::new(&bus)
+async fn resumes(bus: &zbus::Connection) -> zbus::Result<PrepareForSleepStream> {
+    LogindManagerProxy::new(bus)
         .await?
         .receive_prepare_for_sleep()
         .await

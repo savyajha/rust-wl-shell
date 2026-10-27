@@ -5,6 +5,8 @@
 
 mod bar;
 mod blur;
+mod items;
+mod popover;
 mod shell;
 
 use std::env;

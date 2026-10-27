@@ -1,41 +1,48 @@
-//! One output's bar: its workspaces and the focused app on the left, the clock on the right.
+//! One output's bar: its workspaces and the focused app on the left; the keyboard layout,
+//! the power profile, the battery and the clock on the right.
+
+use std::rc::Rc;
 
 use gtk4::{self as gtk, gdk, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::{Component, ComponentParts, ComponentSender};
-use shell_core::Command;
-use shell_core::config::Position;
-use shell_core::niri::Workspace;
+use shell_core::Update;
+use shell_core::config::{Config, Position};
+use shell_core::niri::{self, Workspace};
 use tokio::sync::mpsc::UnboundedSender;
+
+use crate::blur::Blur;
+use crate::items::{BatteryItem, LayoutItem, ProfileItem};
 
 pub struct Bar {
     /// Its connector is the output's name, as niri names outputs.
     monitor: gdk::Monitor,
-    commands: UnboundedSender<Command>,
+    niri: UnboundedSender<niri::Command>,
     /// Every output's workspaces, and this output's, as drawn.
     all: Vec<Workspace>,
     workspaces: Vec<Workspace>,
     app: String,
     clock: String,
+    /// Each one `None` when the config switches it off.
+    layout: Option<LayoutItem>,
+    profile: Option<ProfileItem>,
+    battery: Option<BatteryItem>,
 }
 
 pub struct Init {
     pub monitor: gdk::Monitor,
-    pub position: Position,
-    pub show_workspaces: bool,
-    pub show_app: bool,
-    pub commands: UnboundedSender<Command>,
+    pub config: Rc<Config>,
+    pub niri: UnboundedSender<niri::Command>,
+    /// The power profile to set.
+    pub profiles: UnboundedSender<String>,
+    pub blur: Option<Rc<Blur>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Msg {
-    Niri {
-        /// Every output's.
-        workspaces: Vec<Workspace>,
-        /// The focused window's app name.
-        app: String,
-    },
-    Clock(String),
+    Update(Update),
+    /// The focused window's app, by name.
+    App(String),
     /// The monitor's connector became known: GDK can list a new monitor before it.
     Connector,
 }
@@ -56,20 +63,25 @@ impl Component for Bar {
                     add_css_class: "left",
                     #[name = "workspaces"]
                     gtk::Box {
-                        set_visible: init.show_workspaces,
+                        set_visible: init.config.workspaces,
                     },
                     gtk::Label {
                         add_css_class: "app",
-                        set_visible: init.show_app,
+                        set_visible: init.config.app_name,
                         #[watch]
                         set_label: &model.app,
                     },
                 },
                 #[wrap(Some)]
-                set_end_widget = &gtk::Label {
-                    add_css_class: "clock",
-                    #[watch]
-                    set_label: &model.clock,
+                #[name = "right"]
+                set_end_widget = &gtk::Box {
+                    add_css_class: "right",
+                    #[name = "clock"]
+                    gtk::Label {
+                        add_css_class: "clock",
+                        #[watch]
+                        set_label: &model.clock,
+                    },
                 },
             },
         }
@@ -81,7 +93,7 @@ impl Component for Bar {
         root.set_layer(Layer::Top);
         root.set_keyboard_mode(KeyboardMode::None);
         root.set_monitor(Some(&init.monitor));
-        let edge = match init.position {
+        let edge = match init.config.position {
             Position::Top => Edge::Top,
             Position::Bottom => Edge::Bottom,
         };
@@ -92,15 +104,29 @@ impl Component for Bar {
 
         init.monitor
             .connect_connector_notify(move |_| sender.input(Msg::Connector));
+        let config = &init.config;
         let model = Bar {
             monitor: init.monitor.clone(),
-            commands: init.commands.clone(),
+            niri: init.niri.clone(),
             all: Vec::new(),
             workspaces: Vec::new(),
             app: String::new(),
             clock: String::new(),
+            layout: (config.keyboard_layout)
+                .then(|| LayoutItem::new(init.niri.clone(), &init.blur)),
+            profile: (config.power_profile)
+                .then(|| ProfileItem::new(init.profiles.clone(), &init.blur)),
+            battery: (config.battery)
+                .then(|| BatteryItem::new(config.battery_percentage, &init.blur)),
         };
         let widgets = view_output!();
+        let layout = model.layout.as_ref().map(|item| &item.item.button);
+        let profile = model.profile.as_ref().map(|item| &item.item.button);
+        let battery = model.battery.as_ref().map(|item| &item.item.button);
+        // Before the clock, in this order.
+        for button in [layout, profile, battery].into_iter().flatten() {
+            button.insert_before(&widgets.right, Some(&widgets.clock));
+        }
         ComponentParts { model, widgets }
     }
 
@@ -112,11 +138,24 @@ impl Component for Bar {
         _: &Self::Root,
     ) {
         match msg {
-            Msg::Niri { workspaces, app } => {
-                self.all = workspaces;
-                self.app = app;
+            Msg::Update(Update::Niri(snapshot)) => {
+                self.all = snapshot.workspaces;
+                if let Some(layout) = &mut self.layout {
+                    layout.show(&snapshot.layouts, snapshot.layout);
+                }
             }
-            Msg::Clock(clock) => self.clock = clock,
+            Msg::Update(Update::Clock(clock)) => self.clock = clock,
+            Msg::Update(Update::Battery(battery)) => {
+                if let Some(item) = &self.battery {
+                    item.show(battery.as_ref());
+                }
+            }
+            Msg::Update(Update::Profiles(profiles)) => {
+                if let Some(item) = &self.profile {
+                    item.show(profiles.as_ref());
+                }
+            }
+            Msg::App(app) => self.app = app,
             Msg::Connector => {}
         }
         let connector = self.monitor.connector().map(String::from);
@@ -159,10 +198,10 @@ impl Bar {
                 None => format!("Workspace {}", ws.idx),
             };
             button.update_property(&[gtk::accessible::Property::Label(&label)]);
-            let (commands, id) = (self.commands.clone(), ws.id);
+            let (niri, id) = (self.niri.clone(), ws.id);
             button.connect_clicked(move |_| {
                 // Fails only once the core has stopped, and the shell with it.
-                let _ = commands.send(Command::FocusWorkspace(id));
+                let _ = niri.send(niri::Command::FocusWorkspace(id));
             });
             row.append(&button);
         }

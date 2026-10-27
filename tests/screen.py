@@ -1,3 +1,5 @@
+import time
+
 # Helpers for the VM tests: the pointer, through QMP input-send-event on the USB tablet,
 # whose range covers the screen (SCREEN, in pixels, which the test defines), and the
 # screen, read with QEMU's screendump of the virtio-gpu `gpu`.
@@ -21,6 +23,7 @@ def click(x, y):
     move(x, y)
     for down in [True, False]:
         input_events({"type": "btn", "data": {"down": down, "button": "left"}})
+        time.sleep(0.1)
 
 def screen():
     """The screen from QEMU's screendump: its width and its RGB bytes."""

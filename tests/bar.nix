@@ -19,6 +19,16 @@
 #   6. the AT-SPI tree has the bar, its workspace buttons and its labels
 #   7. an output switched off loses its bar, and gets one again when switched on
 #   8. niri's IPC closing ends the shell with a failure (a fake niri socket)
+#   9. the power profile (a fake power-profiles-daemon): a click on the item opens its
+#      popover with the three profiles; a refused choice leaves the rows on the daemon's
+#      profile; a click on Power Saver sets it on the daemon, closes the popover, and the
+#      item follows
+#  10. the keyboard layout: niri has two, the item shows "EN"; choosing German in its
+#      popover switches niri to it, and the item shows "DE" (xkeyboard-config's short
+#      name); after each popover closes, the bar asks for no keyboard again
+#  11. the battery: none without UPower; shown when (a fake) UPower starts, its popover
+#      with the time left, closed by Escape, after which typing reaches the window again;
+#      its icon and name follow a change; hidden when UPower reports no battery
 
 {
   pkgs,
@@ -56,7 +66,14 @@ let
     }
     output "Virtual-1" { scale 1; position x=0 y=0; }
     output "Virtual-2" { scale 1; position x=1024 y=0; }
+    input {
+        keyboard {
+            xkb { layout "us,de"; }
+        }
+    }
   '';
+
+  fakes = import ./fake-services.nix { inherit pkgs; };
 
   # An app whose desktop file names it, run as foot with its app id.
   alpha = pkgs.writeTextDir "share/applications/org.test.Alpha.desktop" ''
@@ -82,6 +99,7 @@ let
       }
       ''
         import json
+        import sys
         import gi
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi  # noqa: E402
@@ -98,8 +116,24 @@ let
         desktop = Atspi.get_desktop(0)
         count = desktop.get_child_count()
         apps = [desktop.get_child_at_index(i) for i in range(count)]
-        bar = [list(walk(a)) for a in apps if a.get_name() == "rust-wl-shell"]
-        print(json.dumps(bar[0] if bar else []))
+        bar = [a for a in apps if a.get_name() == "rust-wl-shell"]
+        if sys.argv[1:] == ["--checked"]:
+            # The names of the checked nodes: the radio rows chosen.
+            checked = Atspi.StateType.CHECKED
+
+            def nodes(node):
+                yield node
+                for i in range(node.get_child_count()):
+                    child = node.get_child_at_index(i)
+                    if child is not None:
+                        yield from nodes(child)
+
+            print(json.dumps([
+                n.get_name() for n in nodes(bar[0])
+                if n.get_state_set().contains(checked)
+            ]))
+        else:
+            print(json.dumps(list(walk(bar[0])) if bar else []))
       '';
 
   # niri's socket for a second shell: it answers the event-stream request, then closes.
@@ -157,8 +191,25 @@ pkgs.testers.runNixOSTest {
       pkgs.foot
       alpha
       atspiTree
+      pkgs.adwaita-icon-theme
     ];
     systemd.packages = [ niri ];
+
+    # The fakes: power-profiles-daemon from the start, UPower started by the test.
+    services.dbus.packages = [ fakes.policy ];
+    systemd.services.fake-power-profiles = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "dbus";
+        BusName = "org.freedesktop.UPower.PowerProfiles";
+        ExecStart = fakes.profiles;
+      };
+    };
+    systemd.services.fake-upower.serviceConfig = {
+      Type = "dbus";
+      BusName = "org.freedesktop.UPower";
+      ExecStart = fakes.upower;
+    };
     hardware.graphics.enable = true;
     fonts.packages = [ pkgs.adwaita-fonts ];
     services.gnome.at-spi2-core.enable = true;
@@ -213,7 +264,24 @@ pkgs.testers.runNixOSTest {
 
     def wait_for_tree(check, what):
         with machine.nested(f"waiting for {what} in the AT-SPI tree"):
-            retry(lambda _: check(tree()), 30)
+            try:
+                retry(lambda _: check(tree()), 30)
+            except Exception:
+                print(json.dumps(tree()))
+                raise
+
+    def has(role, name):
+        return lambda t: [role, name] in t
+
+    def lacks(role, name):
+        """The bar is in the tree, without that node."""
+        return lambda t: bool(t) and [role, name] not in t
+
+    def keyboard_free():
+        """The bars ask for no keyboard (as when no popover is open)."""
+        layers = json.loads(niri("--json layers"))
+        ours = [layer for layer in layers if layer["namespace"] == "rust-wl-shell"]
+        return ours and all(layer["keyboard_interactivity"] == "None" for layer in ours)
 
     def bars(t):
         return len([role for role, _ in t if role in ("frame", "window")])
@@ -229,6 +297,46 @@ pkgs.testers.runNixOSTest {
         """The i-th dot's centre (from 1): after the bar's padding (spacing, 8), each button
         is the dot (6) and a quarter of the spacing either side."""
         return (8 + (i - 1) * 10 + 5, HEIGHT // 2)
+
+    def right_items():
+        """The bar's right side, right to left, as (first, last) columns of white: the
+        clock, then each item; told apart by the gaps between them (at least 10 px). The
+        pointer, which niri draws, is moved away first."""
+        move(512, 400)
+        time.sleep(0.5)
+        shot = screen()
+        bright = [
+            x for x in range(1023, 600, -1)
+            if any(min(pixel(shot, x, y)) > 180 for y in range(4, HEIGHT - 4))
+        ]
+        items = []
+        for x in bright:
+            if items and items[-1][0] - x < 10:
+                items[-1][0] = x
+            else:
+                items.append([x, x])
+        return items
+
+    def popover_lines():
+        """The open popover's lines of white text, top to bottom, as (x, y) centres: rows of
+        pixels below the bar with white in them, grouped as the right items are."""
+        move(512, 700)
+        time.sleep(0.5)
+        shot = screen()
+        rows = []
+        for y in range(HEIGHT, 300):
+            xs = [x for x in range(500, 1024) if min(pixel(shot, x, y)) > 180]
+            if xs and rows and y - rows[-1][1] < 4:
+                top, _, left, right = rows[-1]
+                rows[-1] = [top, y, min(left, xs[0]), max(right, xs[-1])]
+            elif xs:
+                rows.append([y, y, xs[0], xs[-1]])
+        return [((left + right) // 2, (top + bottom) // 2) for top, bottom, left, right in rows]
+
+    def click_item(i):
+        """A click on the i-th item from the right (the clock is 0)."""
+        first, last = right_items()[i]
+        click((first + last) // 2, HEIGHT // 2)
 
     def clock_text():
         return machine.succeed(f"date '+{CLOCK}'").strip()
@@ -264,7 +372,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a click on a dot switches workspace"):
         spawn("foot")
-        wait_for_tree(lambda t: ["button", "Workspace 2"] in t, "a second workspace's dot")
+        wait_for_tree(has("button", "Workspace 2"), "a second workspace's dot")
         assert active_workspace() == 1
         click(*dot(2))
         retry(lambda _: active_workspace() == 2, 10)
@@ -272,13 +380,13 @@ pkgs.testers.runNixOSTest {
         retry(lambda _: active_workspace() == 1, 10)
 
     with subtest("the app name follows focus"):
-        wait_for_tree(lambda t: ["label", "Foot"] in t, "Foot")
+        wait_for_tree(has("label", "Foot"), "Foot")
         spawn("foot --app-id org.test.Alpha")
-        wait_for_tree(lambda t: ["label", "Alpha Test"] in t, "Alpha Test")
+        wait_for_tree(has("label", "Alpha Test"), "Alpha Test")
         spawn("foot --app-id NoDesktopFile")
-        wait_for_tree(lambda t: ["label", "NoDesktopFile"] in t, "the app id")
+        wait_for_tree(has("label", "NoDesktopFile"), "the app id")
         niri("action focus-column-left")
-        wait_for_tree(lambda t: ["label", "Alpha Test"] in t, "Alpha Test again")
+        wait_for_tree(has("label", "Alpha Test"), "Alpha Test again")
         click(*dot(2))
         def no_app(t):
             names = {name for role, name in t if role == "label"}
@@ -290,6 +398,82 @@ pkgs.testers.runNixOSTest {
 
     with subtest("the clock shows the VM's time"):
         retry(lambda _: clock_text() in labels(), 5)
+
+    with subtest("choosing a power profile sets it"):
+        item = "Power profile: Performance"
+        wait_for_tree(has("button", item), "the power profile")
+        # Right of it: the clock, and the battery while there is one (not here).
+        wait_for_tree(lambda t: not [n for _, n in t if n.startswith("Battery")], "no battery")
+        click_item(1)
+        wait_for_tree(has("radio button", "Power Saver"), "the profiles' popover")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/profiles.ppm gpu 0")
+        # The title, then Performance, Balanced and Power Saver.
+        lines = popover_lines()
+        assert len(lines) == 4, lines
+        # Refused first (as polkit may): the popover, reopened, still shows the profile.
+        machine.succeed("touch /run/fake-power-profiles-refuse")
+        click(*lines[3])
+        wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
+        retry(lambda _: keyboard_free(), 10)
+        click_item(1)
+        wait_for_tree(has("radio button", "Power Saver"), "the profiles' popover again")
+        checked = json.loads(as_user("atspi-tree --checked"))
+        assert "Performance" in checked and "Power Saver" not in checked, checked
+        machine.succeed("rm /run/fake-power-profiles-refuse")
+        click(*lines[3])
+        busctl = "busctl get-property org.freedesktop.UPower.PowerProfiles "
+        busctl += "/org/freedesktop/UPower/PowerProfiles "
+        busctl += "org.freedesktop.UPower.PowerProfiles ActiveProfile"
+        machine.wait_until_succeeds(f"{busctl} | grep -q power-saver", timeout=10)
+        wait_for_tree(has("button", "Power profile: Power Saver"), "the item following")
+        wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
+        retry(lambda _: keyboard_free(), 10)
+
+    with subtest("the keyboard layout switches"):
+        wait_for_tree(has("button", "Keyboard layout: English (US)"), "the layout item")
+        wait_for_tree(has("label", "EN"), "the layout's short name")
+        click_item(2)
+        wait_for_tree(has("radio button", "German"), "the layouts' popover")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/layouts.ppm gpu 0")
+        # English (US), then German.
+        lines = popover_lines()
+        assert len(lines) == 2, lines
+        click(*lines[1])
+        def switched(_):
+            return json.loads(niri("--json keyboard-layouts"))["current_idx"] == 1
+        retry(switched, 10)
+        # xkeyboard-config's short name for German, in upper case.
+        wait_for_tree(has("label", "DE"), "the other layout's short name")
+        retry(lambda _: keyboard_free(), 10)
+
+    with subtest("the battery follows UPower"):
+        battery = "Battery 50%, on battery"
+        # Back to the workspace with the apps, so that the keyboard has a window to return to.
+        niri("action focus-workspace 1")
+        t = tree()
+        assert t and not [n for _, n in t if n.startswith("Battery")], t
+        machine.succeed("systemctl start fake-upower")
+        wait_for_tree(has("button", battery), "the battery")
+        click_item(1)
+        wait_for_tree(has("label", "1:30 remaining"), "the battery's popover")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/battery.ppm gpu 0")
+        machine.send_key("esc")
+        wait_for_tree(lacks("label", "1:30 remaining"), "the popover closed by Escape")
+        retry(lambda _: keyboard_free(), 10)
+        # The keyboard is back with the focused window (a foot running alice's shell). The
+        # layout is German now: no characters that it moves (y, z, punctuation).
+        machine.send_chars("touch focusback\n")
+        machine.wait_for_file("/home/${user}/focusback", timeout=10)
+        first, last = right_items()[1]
+        def icon():
+            shot = screen()
+            return [pixel(shot, x, y) for x in range(first, last + 1) for y in range(HEIGHT)]
+        before = icon()
+        machine.succeed("systemctl kill -s USR1 fake-upower")
+        wait_for_tree(has("button", "Battery 90%, charging"), "the battery charging")
+        assert icon() != before, "the battery's icon did not change"
+        machine.succeed("systemctl kill -s USR2 fake-upower")
+        wait_for_tree(lacks("button", "Battery 90%, charging"), "no battery present")
 
     with subtest("an output switched off loses its bar, and gets it back"):
         wait_for_tree(lambda t: bars(t) == 2, "two bars")

@@ -43,3 +43,41 @@ window.bar button.workspace.active > .dot {
 window.bar .app {
   font-weight: 600;
 }
+
+/* The right side's items: flat buttons, with the greeter's chip plate (white at 0.2,
+   rounded at half its height) while hovered or open. */
+window.bar .right {
+  border-spacing: calc(var(--spacing) / 2);
+}
+
+window.bar menubutton.item > button {
+  all: unset;
+  padding: 0 calc(var(--spacing) * 3 / 4);
+  margin: 2px 0;
+  border-radius: 9999px;
+}
+
+window.bar menubutton.item > button:hover,
+window.bar menubutton.item > button:checked {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* A popover: frosted as the bar, rounded, with a thin outline. */
+popover.item-popover > contents {
+  background-color: rgba(0, 0, 0, 0.35);
+  color: white;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: none;
+  padding: 6px 10px;
+  min-width: 160px;
+}
+
+popover.item-popover .title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+popover.item-popover checkbutton {
+  padding: 3px 0;
+}

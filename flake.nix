@@ -28,7 +28,7 @@
           name: tools: command:
           pkgs.stdenv.mkDerivation {
             name = "rust-wl-shell-${name}";
-            inherit (rust-wl-shell) src cargoDeps buildInputs;
+            inherit (rust-wl-shell) src cargoDeps buildInputs XKB_EVDEV_XML;
             nativeBuildInputs = [
               pkgs.rustPlatform.cargoSetupHook
               pkgs.cargo
@@ -63,6 +63,7 @@
 
         devShells.default = pkgs.mkShell {
           inputsFrom = [ rust-wl-shell ];
+          inherit (rust-wl-shell) XKB_EVDEV_XML;
           packages = with pkgs; [
             rust-analyzer
             clippy

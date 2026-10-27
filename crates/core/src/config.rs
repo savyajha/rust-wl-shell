@@ -9,7 +9,7 @@ const DEFAULT_CLOCK_FORMAT: &str = "%a %-d %b %H:%M";
 const DEFAULT_HEIGHT: u32 = 24;
 const HEIGHTS: std::ops::RangeInclusive<u32> = 16..=64;
 
-#[derive(knuffel::Decode, Debug, PartialEq)]
+#[derive(knuffel::Decode, Clone, Debug, PartialEq)]
 pub struct Config {
     /// The bar's height in logical pixels; the sizes left unset follow it. A minimum: a
     /// font too large for it makes the bar taller.
@@ -32,6 +32,16 @@ pub struct Config {
     pub workspaces: bool,
     #[knuffel(child, unwrap(argument), default = true)]
     pub app_name: bool,
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub battery: bool,
+    /// The battery's percentage next to its icon (macOS leaves it off).
+    #[knuffel(child, unwrap(argument), default = false)]
+    pub battery_percentage: bool,
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub power_profile: bool,
+    /// Shown only with two layouts or more.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub keyboard_layout: bool,
 }
 
 #[derive(knuffel::DecodeScalar, Clone, Copy, Debug, Default, PartialEq)]
@@ -127,6 +137,8 @@ mod tests {
         assert_eq!(config.clock_format, "%a %-d %b %H:%M");
         assert_eq!(config.position, Position::Top);
         assert!(config.workspaces && config.app_name);
+        assert!(config.battery && config.power_profile && config.keyboard_layout);
+        assert!(!config.battery_percentage);
         let sizes = Sizes {
             height: 24,
             font: 13,
@@ -162,6 +174,10 @@ mod tests {
             position "bottom"
             workspaces false
             app-name false
+            battery false
+            battery-percentage true
+            power-profile false
+            keyboard-layout false
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
         assert_eq!(
@@ -176,6 +192,10 @@ mod tests {
                 position: Position::Bottom,
                 workspaces: false,
                 app_name: false,
+                battery: false,
+                battery_percentage: true,
+                power_profile: false,
+                keyboard_layout: false,
             }
         );
     }

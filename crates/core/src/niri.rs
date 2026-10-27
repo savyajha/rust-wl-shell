@@ -1,18 +1,18 @@
-//! niri's IPC: its event stream, folded into the workspaces and the focused app, and the
-//! actions the bar asks for.
+//! niri's IPC: its event stream, folded into the workspaces, the focused app and the
+//! keyboard layouts, and the actions the bar asks for.
 
 use std::env;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use niri_ipc::state::{EventStreamState, EventStreamStatePart};
-use niri_ipc::{Action, Event, Reply, Request, WorkspaceReferenceArg};
+use niri_ipc::{Action, Event, LayoutSwitchTarget, Reply, Request, WorkspaceReferenceArg};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, warn};
 
-use crate::{Command, Update};
+use crate::Update;
 
 /// What the bars show from niri.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -21,6 +21,18 @@ pub struct Snapshot {
     pub workspaces: Vec<Workspace>,
     /// The focused window's app id.
     pub app_id: Option<String>,
+    /// The keyboard layouts' names (as xkb gives them, "English (US)"), and the index of the
+    /// one in use.
+    pub layouts: Vec<String>,
+    pub layout: u8,
+}
+
+/// What the bars ask niri for.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Command {
+    FocusWorkspace(u64),
+    /// The layout at this index in `Snapshot::layouts`.
+    SwitchLayout(u8),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -50,9 +62,12 @@ impl Snapshot {
             .collect();
         workspaces.sort_by(|a, b| (&a.output, a.idx).cmp(&(&b.output, b.idx)));
         let focused = state.windows.windows.values().find(|w| w.is_focused);
+        let layouts = state.keyboard_layouts.keyboard_layouts.as_ref();
         Self {
             workspaces,
             app_id: focused.and_then(|w| w.app_id.clone()),
+            layouts: layouts.map(|l| l.names.clone()).unwrap_or_default(),
+            layout: layouts.map_or(0, |l| l.current_idx),
         }
     }
 }
@@ -91,6 +106,9 @@ pub async fn run(
                 let action = match command {
                     Command::FocusWorkspace(id) => Action::FocusWorkspace {
                         reference: WorkspaceReferenceArg::Id(id),
+                    },
+                    Command::SwitchLayout(index) => Action::SwitchLayout {
+                        layout: LayoutSwitchTarget::Index(index),
                     },
                 };
                 if let Err(e) = perform(&socket, action).await {
@@ -211,5 +229,21 @@ mod tests {
         let order: Vec<u64> = snapshot.workspaces.iter().map(|w| w.id).collect();
         assert_eq!(order, [9, 3, 5]);
         assert_eq!(snapshot.workspaces[1].name.as_deref(), Some("web"));
+    }
+
+    #[test]
+    fn keyboard_layouts_follow_the_events() {
+        let events = concat!(
+            r#"{"KeyboardLayoutsChanged":{"keyboard_layouts":{"names":["English (US)","German"],"current_idx":0}}}"#,
+            "\n",
+            r#"{"KeyboardLayoutSwitched":{"idx":1}}"#,
+        );
+        let snapshots = replay(events);
+        assert_eq!(snapshots[0].layouts, ["English (US)", "German"]);
+        assert_eq!(snapshots[0].layout, 0);
+        assert_eq!(snapshots[1].layout, 1);
+        // The recording's niri had one layout.
+        let recorded = replay(RECORDED);
+        assert_eq!(recorded.last().unwrap().layouts, ["English (US)"]);
     }
 }

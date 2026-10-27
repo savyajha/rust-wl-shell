@@ -6,6 +6,7 @@
   gsettings-desktop-schemas,
   gtk4,
   gtk4-layer-shell,
+  xkeyboard_config,
 }:
 
 rustPlatform.buildRustPackage {
@@ -39,6 +40,9 @@ rustPlatform.buildRustPackage {
     gtk4
     gtk4-layer-shell
   ];
+
+  # The keyboard layouts' short names (crates/core/src/xkb.rs).
+  XKB_EVDEV_XML = "${xkeyboard_config}/share/X11/xkb/rules/evdev.xml";
 
   meta = {
     description = "A macOS-style top bar for niri, in GTK4";

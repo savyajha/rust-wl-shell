@@ -6,11 +6,12 @@
 //! window's snapshot instead, which is not built yet.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use anyhow::Context;
 use gdk4_wayland::prelude::*;
 use gdk4_wayland::{WaylandDisplay, WaylandSurface};
-use gtk4::{self as gtk, gdk, prelude::*};
+use gtk4::{self as gtk, gdk, glib, prelude::*};
 use tracing::{info, warn};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
@@ -28,7 +29,7 @@ pub struct Blur {
     compositor: WlCompositor,
 }
 
-pub type Effect = ExtBackgroundEffectSurfaceV1;
+type Effect = ExtBackgroundEffectSurfaceV1;
 
 impl Blur {
     pub fn new(display: &gdk::Display) -> Option<Self> {
@@ -80,10 +81,28 @@ impl Blur {
         }))
     }
 
-    /// Blur behind all of `window`, which must be realized; the request is applied with
-    /// GTK's next commit. Once the surface is gone the effect is inert; destroying it first
-    /// is only tidy.
-    pub fn apply(&self, window: &gtk::Window) -> Option<Effect> {
+    /// Blur behind all of `native` (a bar's window or a popover) while it is mapped.
+    pub fn attach(blur: &Option<Rc<Blur>>, native: &(impl IsA<gtk::Native> + IsA<gtk::Widget>)) {
+        let Some(blur) = blur.clone() else {
+            return;
+        };
+        let effect: Rc<RefCell<Option<Effect>>> = Rc::default();
+        native.connect_map(glib::clone!(
+            #[strong]
+            effect,
+            move |native| *effect.borrow_mut() = blur.apply(native.upcast_ref())
+        ));
+        // Once the surface is gone the effect is inert; destroying it first is only tidy.
+        native.connect_unmap(move |_| {
+            if let Some(effect) = effect.take() {
+                effect.destroy();
+            }
+        });
+    }
+
+    /// Blur behind all of `native`, which must be mapped; the request is applied with GTK's
+    /// next commit.
+    fn apply(&self, native: &gtk::Native) -> Option<Effect> {
         // Drains what came since (a later change of capabilities is not followed).
         if let Err(e) = self
             .queue
@@ -92,7 +111,7 @@ impl Blur {
         {
             warn!("blur's Wayland queue: {e}");
         }
-        let surface = window.surface()?.downcast::<WaylandSurface>().ok()?;
+        let surface = native.surface()?.downcast::<WaylandSurface>().ok()?;
         let effect = self
             .manager
             .get_background_effect(&surface.wl_surface()?, &self.qh, ());
