@@ -75,11 +75,20 @@ service not running is `None`, and the item hides.
 `audio.rs` follows the default output (sink) over the PulseAudio protocol, which
 pipewire-pulse serves, as the toolkit ADR has it: the default sink's volume (its
 loudest channel, in percent of libpulse's normal volume, as pactl and wpctl show it)
-and mute, and the outputs to choose from. Only hardware outputs are listed:
-pipewire-pulse flags a sink `HARDWARE` unless its node is virtual, which leaves out
-EasyEffects' sink and other filters. Requests set the default sink's volume (its
-channels scaled so that the loudest is at the level, at most 100 %, which keeps their
-balance), its mute, or the default sink.
+and mute, and the outputs to choose from: one per available port (its availability not
+"no") of each hardware sink, as macOS and GNOME list them, so a headphone jack gets its
+own output when something is plugged in (cards are followed too, for their jacks); a
+sink without ports is one output. An output is named by its port's description
+("Speakers"), with its card's added when two outputs would share a name (the sink's
+`device.description`: the card's under pipewire-pulse, the sink's own under
+PulseAudio), and " 2", " 3" in order when they still would; its kind (speaker,
+headphones, display, Bluetooth, other), for its icon, comes from the port's type
+(libpulse 14's, through libpulse-binding's `pa_v14` feature), else from words in its
+name; other kinds (line out) show as speakers, as GNOME shows them. Only hardware sinks are listed: pipewire-pulse flags a sink `HARDWARE` unless its
+node is virtual, which leaves out EasyEffects' sink and other filters. Requests set the
+default sink's volume (its channels scaled so that the loudest is at the level, at most
+100 %, which keeps their balance), its mute, or an output: its port first, unless its
+sink already has it, then the default sink.
 
 **libpulse-binding, not the pure-Rust `pulseaudio` crate.** The `pulseaudio` crate
 (0.3.2) has an async client for lists, server info and the default sink, but its
@@ -148,11 +157,17 @@ keyboard, so that clicks on it leave the focus with the window; while a popover 
 the bar's layer surface asks for the keyboard `OnDemand`, so that Escape reaches it,
 and gives it back (`None`) when the popover closes. `OnDemand` rather than `Exclusive`:
 if the keyboard were ever left asked for, a click on any window would take it back. A
-popover stays open over niri's overview. Radio rows (`radio_rows`) are rebuilt on each
-change, with the chosen one set before the handler runs; choosing another sends its
-command, closes the popover, and switches the shown row back on: GTK selects a clicked
-row at once, and a choice the service refuses (polkit, for one) sends no update, so the
-rows keep showing the service's state until an update rebuilds them. Each item has an accessible name that says its state
+popover stays open over niri's overview.
+
+The rows to choose from (`Item::rows`) look as macOS's: each a flat button with a hover
+plate, a round icon of 26 px (for the one chosen, `@accent_bg_color` with
+`@accent_fg_color` on it, as matugen's gtk.css defines them; the stylesheet defines both
+from GTK's own `@accent_color` and white as defaults, which the user's gtk.css, at a
+higher priority, overrides; a faint white otherwise; it holds an icon, or a short text
+as "DE"), then its label, with no GTK radio or check indicator. For screen readers each row is a radio
+button, checked when chosen. They are rebuilt on each change; a click on another row
+sends its choice and closes the popover, and the rows show the choice only once the
+service's update says it was made, so a refused one (polkit, for one) changes nothing. Each item has an accessible name that says its state
 ("Battery 50%, on battery", "Power profile: Balanced").
 
 `items.rs` has three items, `sliders.rs` two more:
@@ -166,8 +181,11 @@ rows keep showing the service's state until an update rebuilds them. Each item h
   shown only with two layouts or more; the popover lists them, and a choice is niri's
   `SwitchLayout`.
 - the volume: `audio-volume-{muted,low,medium,high}-symbolic` (muted at 0 or muted,
-  then by thirds); the popover has a slider (0–100 %), a Mute check, and the hardware
-  outputs as radio rows, a choice making that output the default.
+  then by thirds); the popover has a "Sound" title, a slider (0–100 %) after the speaker,
+  a flat button that mutes or unmutes (its icon says which it is, its accessible name
+  "Mute" or "Unmute"), and the "Output" section with the outputs as rows, each with its
+  kind's icon, rebuilt only when the outputs change (not on each step of the slider);
+  a choice makes that output play. With no outputs the section is hidden.
 - the brightness: `display-brightness-symbolic`, hidden with no backlight; the popover
   has a slider.
 
@@ -316,9 +334,14 @@ run on the system bus. The test checks:
     (`niri msg layers`)
 13. the volume (PipeWire with pipewire-pulse, two emulated HDA sound cards, and a
     virtual null sink as EasyEffects' is): no OSD at start-up; `wpctl set-volume` moves
-    the item and shows the OSD, which hides after 1.5 s; the popover lists the two
-    hardware outputs, not the virtual one; a drag on its slider sets the volume (pactl)
-    and shows no OSD; choosing the other output makes it the default, with no OSD;
+    the item and shows the OSD, which hides after 1.5 s; the popover lists the hardware
+    sinks' available ports, not the virtual sink, with only the playing row checked (the
+    emulated cards have one port each, "Line Out", on cards both named "Built-in Audio",
+    so the rows are "Line Out (Built-in Audio)" and "Line Out (Built-in Audio) 2"); the
+    speaker before the slider mutes and unmutes (pactl); a drag on its slider sets the
+    volume (pactl)
+    and shows no OSD; choosing the other output makes it the default and, the popover
+    opened again, its row the only one checked, with no OSD;
     `wpctl set-mute` mutes the item and shows the OSD; after a restart of
     pipewire-pulse the item comes back. The VM has no backlight: no brightness item.
 14. the OSD shows on the focused output (Virtual-2), not on the other; with Virtual-2

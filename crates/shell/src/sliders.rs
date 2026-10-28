@@ -1,23 +1,25 @@
-//! The items with a slider: the volume (with mute and the outputs) and the brightness.
+//! The items with a slider: the volume (its icon a mute button, then the outputs) and the
+//! brightness.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::{self as gtk, prelude::*};
-use shell_core::audio::{self, Audio, Request};
+use shell_core::audio::{self, Audio, Kind, Output, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::blur::Blur;
-use crate::popover::{Item, Slider};
+use crate::popover::{Circle, Item, Row, Slider};
 
 pub struct VolumeItem {
     pub item: Item,
     icon: gtk::Image,
     slider: Slider,
-    mute: gtk::CheckButton,
+    /// The slider's icon: a click mutes or unmutes.
+    mute: gtk::Button,
     muted: Rc<Cell<bool>>,
-    /// The outputs' title, and their rows.
-    outputs: (gtk::Label, gtk::Box),
+    /// The outputs' title, their rows, and the outputs the rows show.
+    outputs: (gtk::Label, gtk::Box, RefCell<Vec<Output>>),
     requests: audio::Requests,
 }
 
@@ -25,26 +27,23 @@ impl VolumeItem {
     pub fn new(requests: audio::Requests, blur: &Option<Rc<Blur>>) -> Self {
         let icon = gtk::Image::new();
         let item = Item::new(&icon, "Volume", blur);
-        let sent = requests.clone();
-        let slider = Slider::new("audio-volume-high-symbolic", "Volume", move |volume| {
-            sent.send(Request::Volume(volume));
-        });
-        let mute = gtk::CheckButton::with_label("Mute");
+        let mute = gtk::Button::builder().css_classes(["mute"]).build();
         let muted = Rc::new(Cell::new(false));
         let (sent, shown) = (requests.clone(), muted.clone());
-        mute.connect_toggled(move |mute| {
-            if mute.is_active() != shown.get() {
-                shown.set(mute.is_active());
-                sent.send(Request::Mute(mute.is_active()));
-            }
+        mute.connect_clicked(move |_| sent.send(Request::Mute(!shown.get())));
+        let sent = requests.clone();
+        let slider = Slider::new(&mute, "Volume", move |volume| {
+            sent.send(Request::Volume(volume));
         });
         let outputs = (
             title("Output"),
             gtk::Box::new(gtk::Orientation::Vertical, 0),
+            RefCell::default(),
         );
         item.content.append(&title("Sound"));
         item.content.append(&slider.row);
-        item.content.append(&mute);
+        // Shown once there are outputs.
+        outputs.0.set_visible(false);
         item.content.append(&outputs.0);
         item.content.append(&outputs.1);
         Self {
@@ -73,19 +72,39 @@ impl VolumeItem {
         button.update_property(&[gtk::accessible::Property::Label(&name)]);
         self.slider.show(audio.volume);
         self.muted.set(audio.muted);
-        self.mute.set_active(audio.muted);
-        let labels: Vec<String> = audio
+        let (icon, action) = match audio.muted {
+            true => ("audio-volume-muted-symbolic", "Unmute"),
+            false => ("audio-volume-high-symbolic", "Mute"),
+        };
+        self.mute.set_icon_name(icon);
+        self.mute
+            .update_property(&[gtk::accessible::Property::Label(action)]);
+        // Rebuilt only when they change: not on each step of the slider.
+        let (title, rows, shown) = &self.outputs;
+        if *shown.borrow() == audio.outputs {
+            return;
+        }
+        shown.replace(audio.outputs.clone());
+        title.set_visible(!audio.outputs.is_empty());
+        let entries: Vec<Row> = audio
             .outputs
             .iter()
-            .map(|o| o.description.clone())
+            .map(|output| Row {
+                label: output.name.clone(),
+                circle: Circle::Icon(output_icon(output.kind)),
+            })
             .collect();
-        let chosen = audio.outputs.iter().position(|o| o.name == audio.default);
+        let chosen = audio.outputs.iter().position(|output| output.active);
         let (requests, outputs) = (self.requests.clone(), audio.outputs.clone());
-        let choose = move |i: usize| requests.send(Request::Default(outputs[i].name.clone()));
+        // Its port too, unless its sink already has it.
+        let choose = move |i: usize| {
+            let output = &outputs[i];
+            let port = output.port.clone().filter(|_| !output.port_active);
+            let sink = output.sink.clone();
+            requests.send(Request::Default { sink, port });
+        };
         let chosen = chosen.unwrap_or(usize::MAX);
-        self.item
-            .radio_rows(&self.outputs.1, &labels, chosen, choose);
-        self.outputs.0.set_visible(!labels.is_empty());
+        self.item.rows(rows, &entries, chosen, choose);
     }
 }
 
@@ -97,7 +116,8 @@ pub struct BrightnessItem {
 impl BrightnessItem {
     pub fn new(requests: UnboundedSender<u8>, blur: &Option<Rc<Blur>>) -> Self {
         let item = Item::new(&gtk::Image::from_icon_name(BRIGHTNESS), "Brightness", blur);
-        let slider = Slider::new(BRIGHTNESS, "Brightness", move |level| {
+        let sun = gtk::Image::from_icon_name(BRIGHTNESS);
+        let slider = Slider::new(&sun, "Brightness", move |level| {
             // Fails only once the core has stopped, and the shell with it.
             let _ = requests.send(level as u8);
         });
@@ -120,6 +140,17 @@ impl BrightnessItem {
 }
 
 pub const BRIGHTNESS: &str = "display-brightness-symbolic";
+
+/// The theme's icon for an output's kind; others (line out, say) are speakers, as GNOME
+/// shows them.
+pub fn output_icon(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Speaker | Kind::Other => "audio-speakers-symbolic",
+        Kind::Headphones => "audio-headphones-symbolic",
+        Kind::Display => "video-display-symbolic",
+        Kind::Bluetooth => "bluetooth-symbolic",
+    }
+}
 
 /// The theme's icon for the volume: muted at 0, then by thirds.
 pub fn volume_icon(audio: &Audio) -> &'static str {

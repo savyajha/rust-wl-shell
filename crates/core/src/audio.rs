@@ -6,6 +6,7 @@
 //! socket, which the loop watches as one of its own events. If the server goes away the
 //! thread connects again every 2 s; meanwhile there is no audio.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::convert::Infallible;
 use std::io::{Read, Write};
@@ -20,7 +21,7 @@ use libpulse_binding::callbacks::ListResult;
 use libpulse_binding::context::introspect::SinkInfo;
 use libpulse_binding::context::subscribe::InterestMaskSet;
 use libpulse_binding::context::{self, Context};
-use libpulse_binding::def::SinkFlagSet;
+use libpulse_binding::def::{DevicePortType, PortAvailable, SinkFlagSet};
 use libpulse_binding::mainloop::api::Mainloop as _;
 use libpulse_binding::mainloop::events::io::FlagSet as IoEventFlagSet;
 use libpulse_binding::mainloop::standard::{IterateResult, Mainloop};
@@ -37,16 +38,41 @@ pub struct Audio {
     /// The default output's, in percent (above 100 when set so elsewhere).
     pub volume: u32,
     pub muted: bool,
-    /// The default output's name.
+    /// The default sink's name.
     pub default: String,
-    /// The hardware outputs: filters and virtual sinks (EasyEffects') are left out.
+    /// The available ports of the hardware sinks, one output each (a sink without ports is
+    /// one): filters and virtual sinks (EasyEffects') are left out.
     pub outputs: Vec<Output>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Output {
+    pub sink: String,
+    pub port: Option<String>,
+    /// The port's description, and the card's when two outputs would share it.
     pub name: String,
-    pub description: String,
+    pub kind: Kind,
+    /// The port its sink has now.
+    pub port_active: bool,
+    /// The default sink, on that port: what plays now.
+    pub active: bool,
+}
+
+/// What an output is, for its icon.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Speaker,
+    Headphones,
+    Display,
+    Bluetooth,
+    Other,
+}
+
+impl Audio {
+    /// The output that plays now.
+    pub fn active(&self) -> Option<&Output> {
+        self.outputs.iter().find(|output| output.active)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,8 +80,11 @@ pub enum Request {
     /// In percent.
     Volume(u32),
     Mute(bool),
-    /// The output to make the default, by name.
-    Default(String),
+    /// The sink to make the default, and its port to switch to (none: as it is).
+    Default {
+        sink: String,
+        port: Option<String>,
+    },
 }
 
 /// Requests for the audio thread; it wakes on each.
@@ -71,15 +100,6 @@ impl Requests {
         let _ = self.queue.send(request);
         let _ = (&*self.wake).write(&[0]);
     }
-}
-
-/// A sink, as much as the snapshot needs.
-#[derive(Clone, Debug, PartialEq)]
-struct Sink {
-    output: Output,
-    volume: u32,
-    muted: bool,
-    hardware: bool,
 }
 
 /// The audio thread's state, shared by libpulse's callbacks (all on that thread).
@@ -180,7 +200,9 @@ fn follow(state: &Shared) -> Result<Infallible, &'static str> {
                 state.borrow_mut().changed = true;
             }
         })));
-        context.subscribe(InterestMaskSet::SINK | InterestMaskSet::SERVER, |_| {});
+        // Cards too: a jack plugged in or out changes a port's availability.
+        let interest = InterestMaskSet::SINK | InterestMaskSet::SERVER | InterestMaskSet::CARD;
+        context.subscribe(interest, |_| {});
     }
     let on_wake = {
         let (state, context) = (state.clone(), weak.clone());
@@ -225,28 +247,50 @@ fn read(context: &Weak<RefCell<Context>>, state: &Shared) {
         let Some(strong) = context.upgrade() else {
             return;
         };
-        let (state, sinks) = (state.clone(), RefCell::new(Vec::new()));
-        let mut volumes = None;
+        let state = state.clone();
+        let (mut outputs, mut cards, mut playing) = (Vec::new(), Vec::new(), None);
         let listed = move |listed: ListResult<&SinkInfo>| match listed {
             ListResult::Item(info) => {
-                let name = info.name.as_deref().unwrap_or("").to_string();
-                if name == default {
-                    volumes = Some(info.volume);
+                let text = |s: &Option<Cow<str>>| s.as_deref().unwrap_or("").to_string();
+                let sink = text(&info.name);
+                if sink == default {
+                    playing = Some((percent(info.volume.max()), info.mute, info.volume));
                 }
-                sinks.borrow_mut().push(Sink {
-                    output: Output {
-                        name,
-                        description: info.description.as_deref().unwrap_or("").to_string(),
-                    },
-                    volume: percent(info.volume.max()),
-                    muted: info.mute,
-                    hardware: info.flags.contains(SinkFlagSet::HARDWARE),
+                // Under pipewire-pulse the card's description; under PulseAudio the sink's.
+                let card = info
+                    .proplist
+                    .get_str("device.description")
+                    .unwrap_or_default();
+                let active_port = info.active_port.as_ref().map(|port| text(&port.name));
+                let ports = info.ports.iter().map(|p| Port {
+                    name: text(&p.name),
+                    description: text(&p.description),
+                    kind: kind(p.r#type, &text(&p.name)),
+                    available: p.available != PortAvailable::No,
                 });
+                let sink = Sink {
+                    name: sink,
+                    description: text(&info.description),
+                    hardware: info.flags.contains(SinkFlagSet::HARDWARE),
+                    ports: ports.collect(),
+                    active_port,
+                };
+                for output in sink_outputs(sink, &default) {
+                    outputs.push(output);
+                    cards.push(card.clone());
+                }
             }
             ListResult::End => {
-                let audio = snapshot(&default, &sinks.take());
+                let mut outputs = std::mem::take(&mut outputs);
+                dedupe(&mut outputs, &std::mem::take(&mut cards));
+                let audio = playing.map(|(volume, muted, _)| Audio {
+                    volume,
+                    muted,
+                    default: default.clone(),
+                    outputs,
+                });
                 let mut state = state.borrow_mut();
-                state.volumes = volumes;
+                state.volumes = playing.take().map(|(_, _, volumes)| volumes);
                 if state.shown != audio {
                     debug!("audio: {audio:?}");
                     state.send(audio.clone());
@@ -280,8 +324,14 @@ fn perform(context: &Weak<RefCell<Context>>, state: &State, request: Request) {
                 .introspect()
                 .set_sink_mute_by_name(&shown.default, muted, None);
         }
-        Request::Default(name) => {
-            context.set_default_sink(&name, |_| {});
+        Request::Default { sink, port } => {
+            // The port first, so that the sink plays on it once it is the default.
+            if let Some(port) = port {
+                context
+                    .introspect()
+                    .set_sink_port_by_name(&sink, &port, None);
+            }
+            context.set_default_sink(&sink, |_| {});
         }
     }
 }
@@ -292,55 +342,202 @@ fn percent(volume: Volume) -> u32 {
     ((u64::from(volume.0) * 100 + normal / 2) / normal) as u32
 }
 
-/// What the item shows, from the sinks and the default's name; `None` with no default.
-fn snapshot(default: &str, sinks: &[Sink]) -> Option<Audio> {
-    let sink = sinks.iter().find(|sink| sink.output.name == default)?;
-    let outputs = sinks.iter().filter(|sink| sink.hardware);
-    Some(Audio {
-        volume: sink.volume,
-        muted: sink.muted,
-        default: default.to_string(),
-        outputs: outputs.map(|sink| sink.output.clone()).collect(),
-    })
+/// A sink, as libpulse lists it, as much as its outputs need.
+struct Sink {
+    name: String,
+    description: String,
+    hardware: bool,
+    ports: Vec<Port>,
+    active_port: Option<String>,
+}
+
+struct Port {
+    name: String,
+    description: String,
+    kind: Kind,
+    available: bool,
+}
+
+/// A hardware sink's outputs: one per available port, or one for the sink without ports;
+/// `active` when it is the `default` sink, on that port.
+fn sink_outputs(sink: Sink, default: &str) -> Vec<Output> {
+    if !sink.hardware {
+        return Vec::new();
+    }
+    let available = sink.ports.into_iter().filter(|port| port.available);
+    let mut ports: Vec<_> = available
+        .map(|port| (Some(port.name), port.description, port.kind))
+        .collect();
+    if ports.is_empty() {
+        ports.push((
+            None,
+            sink.description,
+            kind(DevicePortType::Unknown, &sink.name),
+        ));
+    }
+    let output = |(port, name, kind): (Option<String>, String, Kind)| {
+        let port_active = port.is_none() || port == sink.active_port;
+        let active = port_active && sink.name == default;
+        let sink = sink.name.clone();
+        Output {
+            sink,
+            port,
+            name,
+            kind,
+            port_active,
+            active,
+        }
+    };
+    ports.into_iter().map(output).collect()
+}
+
+/// Names that outputs share get their card's description (`cards`, in step with them);
+/// those still shared, " 2", " 3" in order.
+fn dedupe(outputs: &mut [Output], cards: &[String]) {
+    let names: Vec<String> = outputs.iter().map(|output| output.name.clone()).collect();
+    for (i, output) in outputs.iter_mut().enumerate() {
+        if names.iter().filter(|name| **name == names[i]).count() > 1 {
+            output.name = format!("{} ({})", names[i], cards[i]);
+        }
+    }
+    let names: Vec<String> = outputs.iter().map(|output| output.name.clone()).collect();
+    for (i, output) in outputs.iter_mut().enumerate() {
+        let before = names[..i].iter().filter(|name| **name == names[i]).count();
+        if before > 0 {
+            output.name = format!("{} {}", names[i], before + 1);
+        }
+    }
+}
+
+/// A port's kind, by its type (libpulse ≥ 14), else by words in its name.
+fn kind(kind: DevicePortType, name: &str) -> Kind {
+    match kind {
+        DevicePortType::Speaker | DevicePortType::Earpiece => Kind::Speaker,
+        DevicePortType::Headphones | DevicePortType::Headset | DevicePortType::Handset => {
+            Kind::Headphones
+        }
+        DevicePortType::HDMI | DevicePortType::TV | DevicePortType::Video => Kind::Display,
+        DevicePortType::Bluetooth | DevicePortType::Handsfree | DevicePortType::Portable => {
+            Kind::Bluetooth
+        }
+        _ => {
+            let name = name.to_lowercase();
+            let has = |words: &[&str]| words.iter().any(|word| name.contains(word));
+            match () {
+                _ if has(&["hdmi", "displayport", "-dp"]) => Kind::Display,
+                _ if has(&["headphone", "headset"]) => Kind::Headphones,
+                _ if has(&["bluez", "bluetooth"]) => Kind::Bluetooth,
+                _ if has(&["speaker"]) => Kind::Speaker,
+                _ => Kind::Other,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn sink(name: &str, volume: u32, hardware: bool) -> Sink {
-        Sink {
-            output: Output {
-                name: name.into(),
-                description: format!("{name} output"),
-            },
-            volume,
-            muted: false,
-            hardware,
+    fn output(name: &str) -> Output {
+        Output {
+            sink: String::new(),
+            port: None,
+            name: name.into(),
+            kind: Kind::Speaker,
+            port_active: true,
+            active: false,
         }
+    }
+
+    fn sink(name: &str, hardware: bool, ports: &[(&str, bool)], active: Option<&str>) -> Sink {
+        let port = |&(port, available): &(&str, bool)| Port {
+            name: port.into(),
+            description: port.to_uppercase(),
+            kind: Kind::Speaker,
+            available,
+        };
+        Sink {
+            name: name.into(),
+            description: format!("{name} sink"),
+            hardware,
+            ports: ports.iter().map(port).collect(),
+            active_port: active.map(String::from),
+        }
+    }
+
+    /// Each output's sink, name and whether it is active.
+    fn shown(outputs: &[Output]) -> Vec<(&str, &str, bool)> {
+        let shown = outputs
+            .iter()
+            .map(|o| (o.sink.as_str(), o.name.as_str(), o.active));
+        shown.collect()
     }
 
     #[test]
     fn the_default_sinks_volume_and_the_hardware_outputs() {
-        let sinks = [
-            sink("alsa_output.analog-stereo", 40, true),
-            sink("easyeffects_sink", 100, false),
-            sink("alsa_output.hdmi-stereo", 70, true),
-        ];
-        let audio = snapshot("alsa_output.analog-stereo", &sinks).unwrap();
-        assert_eq!((audio.volume, audio.muted), (40, false));
-        let names: Vec<&str> = audio.outputs.iter().map(|o| o.name.as_str()).collect();
+        let ports = [("speaker", true), ("headphones", true), ("line", false)];
+        let analog = sink("analog", true, &ports, Some("headphones"));
+        let outputs = sink_outputs(analog, "analog");
+        // The unavailable port is left out; the active port of the default sink is active.
+        let want = [("analog", "SPEAKER", false), ("analog", "HEADPHONES", true)];
+        assert_eq!(shown(&outputs), want);
+        assert!(outputs[1].port_active && !outputs[0].port_active);
+        // A sink without ports is one output, on whatever it plays.
+        let hdmi = sink_outputs(sink("hdmi", true, &[], None), "analog");
+        assert_eq!(shown(&hdmi), [("hdmi", "hdmi sink", false)]);
+        assert!(hdmi[0].port_active && hdmi[0].port.is_none());
+        // Without an available port too; and a virtual sink (EasyEffects') is none.
+        let unplugged = sink("usb", true, &[("headphones", false)], None);
         assert_eq!(
-            names,
-            ["alsa_output.analog-stereo", "alsa_output.hdmi-stereo"]
+            shown(&sink_outputs(unplugged, "usb")),
+            [("usb", "usb sink", true)]
         );
-        // A virtual default (EasyEffects') still gives its volume.
-        assert_eq!(snapshot("easyeffects_sink", &sinks).unwrap().volume, 100);
+        assert!(sink_outputs(sink("easyeffects_sink", false, &[], None), "x").is_empty());
     }
 
     #[test]
     fn no_default_is_no_audio() {
-        assert_eq!(snapshot("", &[sink("a", 10, true)]), None);
+        // No default sink: none is active (and the callback, finding no sink by that name
+        // to take the volume from, sends no audio at all).
+        let analog = sink("analog", true, &[("speaker", true)], Some("speaker"));
+        assert_eq!(
+            shown(&sink_outputs(analog, "")),
+            [("analog", "SPEAKER", false)]
+        );
+    }
+
+    #[test]
+    fn shared_names_get_their_cards_then_numbers() {
+        let mut outputs = ["Speakers", "Speakers", "HDMI", "Line Out", "Line Out"].map(output);
+        let cards = ["Ryzen", "USB", "Ryzen", "Built-in", "Built-in"].map(String::from);
+        dedupe(&mut outputs, &cards);
+        let names: Vec<&str> = outputs.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Speakers (Ryzen)",
+                "Speakers (USB)",
+                "HDMI",
+                "Line Out (Built-in)",
+                "Line Out (Built-in) 2",
+            ]
+        );
+    }
+
+    #[test]
+    fn kinds_by_type_else_by_name() {
+        assert_eq!(kind(DevicePortType::Headphones, "x"), Kind::Headphones);
+        assert_eq!(kind(DevicePortType::HDMI, "x"), Kind::Display);
+        assert_eq!(kind(DevicePortType::Bluetooth, "x"), Kind::Bluetooth);
+        assert_eq!(
+            kind(DevicePortType::Unknown, "hdmi-output-0"),
+            Kind::Display
+        );
+        assert_eq!(
+            kind(DevicePortType::Unknown, "analog-output-speaker"),
+            Kind::Speaker
+        );
+        assert_eq!(kind(DevicePortType::Unknown, "analog-output"), Kind::Other);
     }
 
     #[test]

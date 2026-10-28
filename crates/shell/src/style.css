@@ -1,3 +1,8 @@
+/* Defaults for the accent colours GTK's own theme lacks; a user's gtk.css (matugen's, for
+   one) defines them at a higher priority, and wins. */
+@define-color accent_bg_color @accent_color;
+@define-color accent_fg_color white;
+
 /* The bar: macOS's dark menu bar, a translucent tint over the compositor's blur, with white
    text. The sizes are variables, set on window.bar from the config (main.rs). */
 
@@ -69,25 +74,55 @@ popover.item-popover > contents {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: none;
-  padding: 6px 10px;
-  min-width: 160px;
+  padding: 8px 6px;
+  min-width: 220px;
 }
 
 popover.item-popover .title {
   font-weight: 600;
-  margin-bottom: 4px;
-}
-
-popover.item-popover checkbutton {
-  padding: 3px 0;
+  margin: 0 6px 4px;
 }
 
 popover.item-popover .slider-row {
-  margin: 4px 0 8px;
+  margin: 4px 6px 10px;
 }
 
-popover.item-popover checkbutton + .title {
-  margin-top: 6px;
+/* A row, as macOS's: a flat button with a plate while hovered; a round icon, filled with
+   the accent when it is the one chosen, then its label. */
+popover.item-popover button.row {
+  all: unset;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+popover.item-popover button.row:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+popover.item-popover .circle {
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+popover.item-popover .circle.chosen {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+
+popover.item-popover .circle > image {
+  -gtk-icon-size: 14px;
+}
+
+popover.item-popover .circle > label {
+  font-size: 0.75em;
+  font-weight: 600;
+}
+
+/* The speaker before the volume's slider: a flat button, which mutes. */
+popover.item-popover button.mute {
+  all: unset;
 }
 
 popover.item-popover scale {

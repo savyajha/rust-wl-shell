@@ -48,44 +48,72 @@ impl Item {
         }
     }
 
-    /// Replace the rows in `rows` (part of the content) with one radio row per label, the
-    /// `chosen` one selected; a click on another calls `choose` with its index and closes.
-    pub fn radio_rows(
+    /// Replace the rows in `rows` (part of the content) with `entries`, the `chosen` one
+    /// shown as such; a click on another calls `choose` with its index and closes. A row is
+    /// a flat button: a round icon (filled with the accent when chosen), then its label. For
+    /// screen readers it is a radio button, checked when chosen.
+    pub fn rows(
         &self,
         rows: &gtk::Box,
-        labels: &[String],
+        entries: &[Row],
         chosen: usize,
         choose: impl Fn(usize) + Clone + 'static,
     ) {
         while let Some(child) = rows.first_child() {
             rows.remove(&child);
         }
-        let buttons: Vec<gtk::CheckButton> = labels
-            .iter()
-            .map(|label| gtk::CheckButton::with_label(label))
-            .collect();
-        // Weak: each row's handler holds it, and rows hold their handlers.
-        let shown = buttons.get(chosen).map(|row| row.downgrade());
-        for (i, row) in buttons.iter().enumerate() {
-            if i > 0 {
-                row.set_group(Some(&buttons[0]));
+        for (i, entry) in entries.iter().enumerate() {
+            let circle = gtk::CenterBox::builder().css_classes(["circle"]).build();
+            let inside: gtk::Widget = match &entry.circle {
+                Circle::Icon(name) => gtk::Image::from_icon_name(name).upcast(),
+                Circle::Text(text) => gtk::Label::new(Some(text)).upcast(),
+            };
+            inside.set_halign(gtk::Align::Center);
+            inside.set_valign(gtk::Align::Center);
+            circle.set_center_widget(Some(&inside));
+            circle.set_valign(gtk::Align::Center);
+            if i == chosen {
+                circle.add_css_class("chosen");
             }
-            row.set_active(i == chosen);
-            let (popover, choose, shown) = (self.popover.clone(), choose.clone(), shown.clone());
-            row.connect_toggled(move |row| {
-                if row.is_active() && i != chosen {
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            content.append(&circle);
+            content.append(&gtk::Label::new(Some(&entry.label)));
+            let row = gtk::Button::builder()
+                .child(&content)
+                .css_classes(["row"])
+                .accessible_role(gtk::AccessibleRole::Radio)
+                .build();
+            let checked = match i == chosen {
+                true => gtk::AccessibleTristate::True,
+                false => gtk::AccessibleTristate::False,
+            };
+            row.update_property(&[gtk::accessible::Property::Label(&entry.label)]);
+            row.update_state(&[gtk::accessible::State::Checked(checked)]);
+            let (popover, choose) = (self.popover.clone(), choose.clone());
+            row.connect_clicked(move |_| {
+                // Shown as chosen only once the service says so: a refused choice leaves
+                // the rows as they were.
+                if i != chosen {
                     choose(i);
                     popover.popdown();
-                    // Shown again until the service's update rebuilds the rows: a choice
-                    // that fails leaves things as they were.
-                    if let Some(shown) = shown.as_ref().and_then(|shown| shown.upgrade()) {
-                        shown.set_active(true);
-                    }
                 }
             });
-            rows.append(row);
+            rows.append(&row);
         }
     }
+}
+
+/// A row of `Item::rows`.
+pub struct Row {
+    pub label: String,
+    pub circle: Circle,
+}
+
+/// What a row's circle holds.
+pub enum Circle {
+    Icon(&'static str),
+    /// A short text, as "DE".
+    Text(String),
 }
 
 fn keyboard(popover: &gtk::Popover, mode: KeyboardMode) {
@@ -94,8 +122,8 @@ fn keyboard(popover: &gtk::Popover, mode: KeyboardMode) {
     }
 }
 
-/// A slider from 0 to 100 % in a popover, after `icon`. Moved by the user, it calls
-/// `moved`; `show` moves it without.
+/// A slider from 0 to 100 % in a popover, after `icon` (an image, or a button). Moved by the
+/// user, it calls `moved`; `show` moves it without.
 pub struct Slider {
     pub row: gtk::Box,
     scale: gtk::Scale,
@@ -103,13 +131,13 @@ pub struct Slider {
 }
 
 impl Slider {
-    pub fn new(icon: &str, name: &str, moved: impl Fn(u32) + 'static) -> Self {
+    pub fn new(icon: &impl IsA<gtk::Widget>, name: &str, moved: impl Fn(u32) + 'static) -> Self {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row.add_css_class("slider-row");
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
         scale.set_hexpand(true);
         scale.update_property(&[gtk::accessible::Property::Label(name)]);
-        row.append(&gtk::Image::from_icon_name(icon));
+        row.append(icon);
         row.append(&scale);
         let shown = Rc::new(Cell::new(u32::MAX));
         scale.connect_value_changed(glib::clone!(

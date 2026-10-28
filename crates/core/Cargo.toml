@@ -13,7 +13,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-lite = { version = "2", default-features = false }
 knuffel = "3"
 miette = "5"
-libpulse-binding = "2.30"
+libpulse-binding = { version = "2.30", features = ["pa_v14"] }
 niri-ipc = "=26.4.0"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "net", "time", "io-util", "sync"] }

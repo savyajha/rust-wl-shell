@@ -75,7 +75,8 @@ at most the height. The clock is redrawn on each minute and after a resume from 
 The items on the right, right to left after the clock: the battery, the volume, the
 brightness, the power profile, the keyboard layout. Each is a symbolic icon from the icon theme (the layout is its short
 name, as GNOME has it, in upper case: "EN", "DE") and opens a popover under it: the battery's percentage, state and time
-left; the volume's slider, a mute check and the outputs to choose from; the brightness's
+left; the volume's slider (its speaker mutes) and the outputs (each sound card's available
+ports) to choose from; the brightness's
 slider; the power profiles to choose from; the layouts to choose from. A click outside or
 Escape closes it. The brightness is set through logind, which needs no permission.
 

@@ -31,10 +31,11 @@
 #      its icon and name follow a change; hidden when UPower reports no battery
 #  12. the volume (PipeWire, two emulated sound cards and a virtual sink): no OSD at
 #      start-up; an outside change moves the item and shows the OSD, which hides; the
-#      popover lists the hardware outputs only; a slider drag sets the volume with no
-#      OSD; choosing the other output makes it the default, with no OSD; an outside mute
-#      shows the OSD; the server restarted, the item comes back. No backlight in the VM:
-#      no brightness item.
+#      popover lists the hardware sinks' available ports only, the one playing checked;
+#      its speaker icon mutes and unmutes; a slider drag sets the volume with no OSD;
+#      choosing the other output makes it the default and its row the checked one, with
+#      no OSD; an outside mute shows the OSD; the server restarted, the item comes back.
+#      No backlight in the VM: no brightness item.
 #  13. the OSD shows on the focused output; with that output switched off, on another
 
 {
@@ -129,7 +130,20 @@ let
         count = desktop.get_child_count()
         apps = [desktop.get_child_at_index(i) for i in range(count)]
         bar = [a for a in apps if a.get_name() == "rust-wl-shell"]
-        if sys.argv[1:] == ["--checked"]:
+        if sys.argv[1:] == ["--radios"]:
+            # Whether each radio button (each row) is checked, in order.
+            checked = Atspi.StateType.CHECKED
+
+            def radios(node):
+                if node.get_role_name() == "radio button":
+                    yield node.get_state_set().contains(checked)
+                for i in range(node.get_child_count()):
+                    child = node.get_child_at_index(i)
+                    if child is not None:
+                        yield from radios(child)
+
+            print(json.dumps(list(radios(bar[0]))))
+        elif sys.argv[1:] == ["--checked"]:
             # The names of the checked nodes: the radio rows chosen.
             checked = Atspi.StateType.CHECKED
 
@@ -487,15 +501,31 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(has("label", "30"), "the OSD with 30")
         machine.send_monitor_command(f"screendump {machine.out_dir}/osd.ppm gpu 0")
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden after 1.5 s")
-        # Its popover: Sound, the slider, Mute, Output, and the two hardware outputs.
+        # Its popover: Sound, the slider (after its mute button), Output, and a row per
+        # available port of the two hardware sinks, the one playing checked.
         click_item(1)
         wait_for_tree(has("slider", "Volume"), "the volume's popover")
         t = tree()
         outputs = [n for r, n in t if r == "radio button"]
-        assert len(outputs) == 2 and "Virtual Sink" not in outputs, outputs
+        print(f"the outputs: {outputs}")
+        assert len(outputs) >= 2 and not [o for o in outputs if "Virtual" in o], outputs
+        # The emulated cards' ports share their names, card and all: told apart by place.
+        radios = json.loads(as_user("atspi-tree --radios"))
+        assert radios.count(True) == 1, radios
         machine.send_monitor_command(f"screendump {machine.out_dir}/volume.ppm gpu 0")
         lines = popover_lines()
-        assert len(lines) == 6, lines
+        assert len(lines) == 3 + len(outputs), lines
+        # The speaker's icon mutes, and unmutes: a click on the slider row's first white.
+        shot = screen()
+        y = lines[1][1]
+        icon = next(x for x in range(500, 1024) if min(pixel(shot, x, y)) > 180)
+        wait_for_tree(has("button", "Mute"), "the mute button")
+        click(icon + 6, y)
+        retry(lambda _: "yes" in as_user("pactl get-sink-mute @DEFAULT_SINK@"), 10)
+        wait_for_tree(has("button", "Unmute"), "the unmute button")
+        assert not osd_shown(tree()), "an OSD for the user's own mute"
+        click(icon + 6, y)
+        retry(lambda _: "no" in as_user("pactl get-sink-mute @DEFAULT_SINK@"), 10)
         # A drag on the slider, to about 80 %: it sets the volume, and shows no OSD.
         first, last = slider_trough(lines[1][1])
         width = last - first
@@ -504,15 +534,25 @@ pkgs.testers.runNixOSTest {
         for _ in range(4):
             assert not osd_shown(tree()), "an OSD for the user's own slider"
             time.sleep(0.5)
-        # The other output, made the default.
+        # An output on the other card, made the default: the last row (the first is
+        # playing, as the first card's sink is the default).
         default = as_user("pactl get-default-sink").strip()
-        click(*lines[5])
+        assert radios[0], radios
+        click(*lines[-1])
         retry(lambda _: as_user("pactl get-default-sink").strip() != default, 10)
         retry(lambda _: keyboard_free(), 10)
         # A switch of output is no change of volume: no OSD.
         for _ in range(4):
             assert not osd_shown(tree()), "an OSD for a switch of output"
             time.sleep(0.5)
+        # Opened again, the popover checks the row chosen, and only that one.
+        click_item(1)
+        wait_for_tree(has("slider", "Volume"), "the volume's popover again")
+        radios = json.loads(as_user("atspi-tree --radios"))
+        assert radios[-1] and not radios[0], radios
+        machine.send_key("esc")
+        wait_for_tree(lacks("slider", "Volume"), "the popover closed")
+        retry(lambda _: keyboard_free(), 10)
         # Mute from outside: the item says so, and the OSD shows.
         as_user("wpctl set-mute @DEFAULT_AUDIO_SINK@ 1")
         wait_for_tree(has("button", "Volume muted"), "the volume item muted")

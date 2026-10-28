@@ -11,7 +11,7 @@ use shell_core::{niri, xkb};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::blur::Blur;
-use crate::popover::Item;
+use crate::popover::{Circle, Item, Row};
 
 pub struct BatteryItem {
     pub item: Item,
@@ -111,11 +111,18 @@ impl ProfileItem {
             return;
         };
         self.icon
-            .set_icon_name(Some(&format!("power-profile-{}-symbolic", profiles.active)));
+            .set_icon_name(Some(profile_icon(&profiles.active)));
         let name = format!("Power profile: {}", profile_name(&profiles.active));
         let button = &self.item.button;
         button.update_property(&[gtk::accessible::Property::Label(&name)]);
-        let labels: Vec<String> = profiles.offered.iter().map(|p| profile_name(p)).collect();
+        let rows: Vec<Row> = profiles
+            .offered
+            .iter()
+            .map(|profile| Row {
+                label: profile_name(profile),
+                circle: Circle::Icon(profile_icon(profile)),
+            })
+            .collect();
         let chosen = profiles.offered.iter().position(|p| *p == profiles.active);
         let (requests, offered) = (self.requests.clone(), profiles.offered.clone());
         let choose = move |i: usize| {
@@ -123,7 +130,7 @@ impl ProfileItem {
             let _ = requests.send(offered[i].clone());
         };
         let chosen = chosen.unwrap_or(usize::MAX);
-        self.item.radio_rows(&self.rows, &labels, chosen, choose);
+        self.item.rows(&self.rows, &rows, chosen, choose);
         let why = profiles
             .degraded
             .as_deref()
@@ -176,8 +183,14 @@ impl LayoutItem {
         let choose = move |i: usize| {
             let _ = niri.send(niri::Command::SwitchLayout(i as u8));
         };
-        self.item
-            .radio_rows(&self.rows, layouts, current as usize, choose);
+        let rows: Vec<Row> = layouts
+            .iter()
+            .map(|layout| Row {
+                label: layout.clone(),
+                circle: Circle::Text(xkb::short_name(layout).to_uppercase()),
+            })
+            .collect();
+        self.item.rows(&self.rows, &rows, current as usize, choose);
     }
 }
 
@@ -194,6 +207,14 @@ fn battery_icon(battery: &Battery) -> String {
         ""
     };
     format!("battery-level-{level}{charging}-symbolic")
+}
+
+fn profile_icon(profile: &str) -> &'static str {
+    match profile {
+        "performance" => "power-profile-performance-symbolic",
+        "power-saver" => "power-profile-power-saver-symbolic",
+        _ => "power-profile-balanced-symbolic",
+    }
 }
 
 fn profile_name(profile: &str) -> String {
