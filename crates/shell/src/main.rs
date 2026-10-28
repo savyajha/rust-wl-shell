@@ -6,8 +6,10 @@
 mod bar;
 mod blur;
 mod items;
+mod osd;
 mod popover;
 mod shell;
+mod sliders;
 
 use std::env;
 use std::ffi::OsString;
@@ -93,7 +95,7 @@ fn run(marks: Marks, path: Option<PathBuf>) -> anyhow::Result<()> {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
-    let core = shell_core::start(config.clock_format.clone());
+    let core = shell_core::start(config.clock_format.clone(), config.backlight.clone());
     let main_loop = glib::MainLoop::new(None, false);
     shell::start(&display, config, core, marks, main_loop.clone());
     main_loop.run();
@@ -142,8 +144,8 @@ fn stylesheet(sizes: Sizes) -> String {
         dot,
     } = sizes;
     format!(
-        "window.bar {{ --height: {height}px; --font-size: {font}px; --icon-size: {icon}px; \
-         --spacing: {spacing}px; --dot-size: {dot}px; }}\n{}",
+        "window.bar, window.osd {{ --height: {height}px; --font-size: {font}px; \
+         --icon-size: {icon}px; --spacing: {spacing}px; --dot-size: {dot}px; }}\n{}",
         include_str!("style.css")
     )
 }

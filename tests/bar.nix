@@ -29,6 +29,13 @@
 #  11. the battery: none without UPower; shown when (a fake) UPower starts, its popover
 #      with the time left, closed by Escape, after which typing reaches the window again;
 #      its icon and name follow a change; hidden when UPower reports no battery
+#  12. the volume (PipeWire, two emulated sound cards and a virtual sink): no OSD at
+#      start-up; an outside change moves the item and shows the OSD, which hides; the
+#      popover lists the hardware outputs only; a slider drag sets the volume with no
+#      OSD; choosing the other output makes it the default, with no OSD; an outside mute
+#      shows the OSD; the server restarted, the item comes back. No backlight in the VM:
+#      no brightness item.
+#  13. the OSD shows on the focused output; with that output switched off, on another
 
 {
   pkgs,
@@ -102,13 +109,18 @@ let
         import sys
         import gi
         gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi  # noqa: E402
+        from gi.repository import Atspi, GLib  # noqa: E402
 
 
         def walk(node):
-            yield [node.get_role_name(), node.get_name()]
-            for i in range(node.get_child_count()):
-                child = node.get_child_at_index(i)
+            try:
+                yield [node.get_role_name(), node.get_name()]
+                count = node.get_child_count()
+                children = [node.get_child_at_index(i) for i in range(count)]
+            except GLib.Error:
+                # Gone while walked (an OSD hiding, a popover closing): left out.
+                return
+            for child in children:
                 if child is not None:
                     yield from walk(child)
 
@@ -192,7 +204,31 @@ pkgs.testers.runNixOSTest {
       alpha
       atspiTree
       pkgs.adwaita-icon-theme
+      # pactl, to read the volume and the default output.
+      pkgs.pulseaudio
     ];
+
+    # Audio: PipeWire with pipewire-pulse, on two emulated sound cards (hardware outputs)
+    # and a null sink (a virtual one, which the volume item leaves out).
+    services.pipewire = {
+      enable = true;
+      pulse.enable = true;
+      extraConfig.pipewire."10-virtual-sink" = {
+        "context.objects" = [
+          {
+            factory = "adapter";
+            args = {
+              "factory.name" = "support.null-audio-sink";
+              "node.name" = "virtual_sink";
+              "node.description" = "Virtual Sink";
+              "media.class" = "Audio/Sink";
+              # As EasyEffects' sink is: pipewire-pulse then leaves out its HARDWARE flag.
+              "node.virtual" = true;
+            };
+          }
+        ];
+      };
+    };
     systemd.packages = [ niri ];
 
     # The fakes: power-profiles-daemon from the start, UPower started by the test.
@@ -237,6 +273,12 @@ pkgs.testers.runNixOSTest {
     virtualisation.qemu.options = [
       "-vga none"
       "-device ${lib.escapeShellArg gpu}"
+      "-audiodev none,id=sound1"
+      "-audiodev none,id=sound2"
+      "-device ich9-intel-hda,id=hda1"
+      "-device hda-output,bus=hda1.0,audiodev=sound1"
+      "-device intel-hda,id=hda2"
+      "-device hda-output,bus=hda2.0,audiodev=sound2"
     ];
   };
 
@@ -333,6 +375,41 @@ pkgs.testers.runNixOSTest {
                 rows.append([y, y, xs[0], xs[-1]])
         return [((left + right) // 2, (top + bottom) // 2) for top, bottom, left, right in rows]
 
+    def slider_trough(y):
+        """The open popover's slider at row y: the longest run of light pixels (the track,
+        its white part and the knob; not niri's grey around the popover), as (first, last)
+        columns."""
+        move(512, 700)
+        time.sleep(0.5)
+        shot = screen()
+        runs, run = [], []
+        for x in range(500, 1024):
+            if min(pixel(shot, x, y)) > 110 and not is_grey(pixel(shot, x, y)):
+                run.append(x)
+            elif run:
+                runs.append(run)
+                run = []
+        longest = max(runs + [run], key=len)
+        return longest[0], longest[-1]
+
+    def drag(start, end):
+        """A drag with the left button, from `start` to `end`, in steps."""
+        move(*start)
+        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
+        for i in range(1, 11):
+            move(start[0] + (end[0] - start[0]) * i // 10, start[1])
+            time.sleep(0.05)
+        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
+
+    def volume():
+        """The default output's volume in percent, as pactl reads it."""
+        out = as_user("pactl get-sink-volume @DEFAULT_SINK@")
+        return int(re.findall(r"(\d+)%", out)[0])
+
+    def osd_shown(t):
+        """The OSD's value, a label of digits alone, is in the tree."""
+        return any(role == "label" and name.isdigit() for role, name in t)
+
     def click_item(i):
         """A click on the i-th item from the right (the clock is 0)."""
         first, last = right_items()[i]
@@ -399,12 +476,59 @@ pkgs.testers.runNixOSTest {
     with subtest("the clock shows the VM's time"):
         retry(lambda _: clock_text() in labels(), 5)
 
+    with subtest("the volume: the icon follows, the slider sets it, the OSD shows"):
+        wait_for_tree(lambda t: any(n.startswith("Volume ") for _, n in t), "the volume")
+        t = tree()
+        assert not [n for _, n in t if n.startswith("Brightness")], "a backlight in the VM?"
+        assert not osd_shown(t), "an OSD at start-up"
+        # From outside the shell: the item follows, and the OSD shows, then hides.
+        as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.30")
+        wait_for_tree(has("button", "Volume 30%"), "the volume item at 30 %")
+        wait_for_tree(has("label", "30"), "the OSD with 30")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/osd.ppm gpu 0")
+        wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden after 1.5 s")
+        # Its popover: Sound, the slider, Mute, Output, and the two hardware outputs.
+        click_item(1)
+        wait_for_tree(has("slider", "Volume"), "the volume's popover")
+        t = tree()
+        outputs = [n for r, n in t if r == "radio button"]
+        assert len(outputs) == 2 and "Virtual Sink" not in outputs, outputs
+        machine.send_monitor_command(f"screendump {machine.out_dir}/volume.ppm gpu 0")
+        lines = popover_lines()
+        assert len(lines) == 6, lines
+        # A drag on the slider, to about 80 %: it sets the volume, and shows no OSD.
+        first, last = slider_trough(lines[1][1])
+        width = last - first
+        drag((first + width // 5, lines[1][1]), (first + width * 4 // 5, lines[1][1]))
+        retry(lambda _: 70 <= volume() <= 90, 10)
+        for _ in range(4):
+            assert not osd_shown(tree()), "an OSD for the user's own slider"
+            time.sleep(0.5)
+        # The other output, made the default.
+        default = as_user("pactl get-default-sink").strip()
+        click(*lines[5])
+        retry(lambda _: as_user("pactl get-default-sink").strip() != default, 10)
+        retry(lambda _: keyboard_free(), 10)
+        # A switch of output is no change of volume: no OSD.
+        for _ in range(4):
+            assert not osd_shown(tree()), "an OSD for a switch of output"
+            time.sleep(0.5)
+        # Mute from outside: the item says so, and the OSD shows.
+        as_user("wpctl set-mute @DEFAULT_AUDIO_SINK@ 1")
+        wait_for_tree(has("button", "Volume muted"), "the volume item muted")
+        wait_for_tree(osd_shown, "the OSD for mute")
+        wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden")
+        # The server restarted: the item goes, and comes back once it does.
+        as_user("systemctl --user restart pipewire-pulse.service")
+        machine.wait_until_succeeds(f"test $({LOG} | grep -c 'audio: connected') -ge 2", timeout=30)
+        wait_for_tree(has("button", "Volume muted"), "the volume item back")
+
     with subtest("choosing a power profile sets it"):
         item = "Power profile: Performance"
         wait_for_tree(has("button", item), "the power profile")
-        # Right of it: the clock, and the battery while there is one (not here).
         wait_for_tree(lambda t: not [n for _, n in t if n.startswith("Battery")], "no battery")
-        click_item(1)
+        # Right of it: the clock, the volume, and the battery while there is one (not here).
+        click_item(2)
         wait_for_tree(has("radio button", "Power Saver"), "the profiles' popover")
         machine.send_monitor_command(f"screendump {machine.out_dir}/profiles.ppm gpu 0")
         # The title, then Performance, Balanced and Power Saver.
@@ -415,7 +539,7 @@ pkgs.testers.runNixOSTest {
         click(*lines[3])
         wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
         retry(lambda _: keyboard_free(), 10)
-        click_item(1)
+        click_item(2)
         wait_for_tree(has("radio button", "Power Saver"), "the profiles' popover again")
         checked = json.loads(as_user("atspi-tree --checked"))
         assert "Performance" in checked and "Power Saver" not in checked, checked
@@ -432,7 +556,7 @@ pkgs.testers.runNixOSTest {
     with subtest("the keyboard layout switches"):
         wait_for_tree(has("button", "Keyboard layout: English (US)"), "the layout item")
         wait_for_tree(has("label", "EN"), "the layout's short name")
-        click_item(2)
+        click_item(3)
         wait_for_tree(has("radio button", "German"), "the layouts' popover")
         machine.send_monitor_command(f"screendump {machine.out_dir}/layouts.ppm gpu 0")
         # English (US), then German.
@@ -477,9 +601,25 @@ pkgs.testers.runNixOSTest {
 
     with subtest("an output switched off loses its bar, and gets it back"):
         wait_for_tree(lambda t: bars(t) == 2, "two bars")
+        # The OSD on Virtual-2 (focused), not on Virtual-1: the middle of its bottom.
+        def osd_on(head):
+            width, _ = shot = screen(head)
+            height = len(shot[1]) // 3 // width
+            return not is_grey(pixel(shot, width // 2, height - 48 - 22))
+        niri("action focus-monitor-right")
+        as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.55")
+        wait_for_tree(has("label", "55"), "the OSD with 55")
+        assert osd_on(1) and not osd_on(0), "the OSD not on the focused output"
+        wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden")
         niri("output Virtual-2 off")
         machine.wait_until_succeeds(f"{LOG} | grep -q 'output Virtual-2 removed'")
         wait_for_tree(lambda t: bars(t) == 1, "one bar")
+        # Its output gone, the OSD shows on the one left.
+        as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.65")
+        wait_for_tree(has("label", "65"), "the OSD with 65")
+        retry(lambda _: osd_on(0), 5)
+        machine.send_monitor_command(f"screendump {machine.out_dir}/osd-moved.ppm gpu 0")
+        wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden again")
         niri("output Virtual-2 on")
         # GDK may list the output before its name, so the bar finds its workspaces later.
         wait_for_tree(

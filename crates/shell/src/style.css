@@ -81,3 +81,62 @@ popover.item-popover .title {
 popover.item-popover checkbutton {
   padding: 3px 0;
 }
+
+popover.item-popover .slider-row {
+  margin: 4px 0 8px;
+}
+
+popover.item-popover checkbutton + .title {
+  margin-top: 6px;
+}
+
+popover.item-popover scale {
+  min-width: 200px;
+}
+
+/* The sliders and the OSD's level: a white bar on a faint track, round at the ends. */
+popover.item-popover scale trough,
+window.osd levelbar trough {
+  background-color: rgba(255, 255, 255, 0.3);
+  border: none;
+  border-radius: 9999px;
+  min-height: 6px;
+}
+
+popover.item-popover scale highlight,
+window.osd levelbar block.filled {
+  background-color: white;
+  border: none;
+  border-radius: 9999px;
+  min-width: 6px;
+  min-height: 6px;
+}
+
+window.osd levelbar block.empty {
+  background-color: transparent;
+  border: none;
+}
+
+/* The OSD: a frosted pill, as vibepanel's: an icon at 1.5 times the bar's, a 200 px level
+   and its value. */
+window.osd {
+  background-color: rgba(0, 0, 0, 0.35);
+  color: white;
+  font-size: var(--font-size);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  padding: 10px 16px;
+}
+
+window.osd image {
+  -gtk-icon-size: calc(var(--icon-size) * 1.5);
+}
+
+window.osd levelbar {
+  min-width: 200px;
+  margin: 0 8px;
+}
+
+window.osd label {
+  min-width: 2em;
+}

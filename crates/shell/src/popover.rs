@@ -3,9 +3,10 @@
 //! closes it on an outside click (one open at a time) and on Escape; it is frosted as the
 //! bar is.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
-use gtk4::{self as gtk, prelude::*};
+use gtk4::{self as gtk, glib, prelude::*};
 use gtk4_layer_shell::{KeyboardMode, LayerShell};
 
 use crate::blur::Blur;
@@ -38,7 +39,8 @@ impl Item {
         // takes it back, should it ever be left asked for).
         popover.connect_show(|popover| keyboard(popover, KeyboardMode::OnDemand));
         popover.connect_closed(|popover| keyboard(popover, KeyboardMode::None));
-        Blur::attach(blur, &popover);
+        // The radius of style.css.
+        Blur::attach(blur, &popover, 10);
         Self {
             button,
             popover,
@@ -89,5 +91,43 @@ impl Item {
 fn keyboard(popover: &gtk::Popover, mode: KeyboardMode) {
     if let Some(window) = popover.root().and_downcast::<gtk::Window>() {
         window.set_keyboard_mode(mode);
+    }
+}
+
+/// A slider from 0 to 100 % in a popover, after `icon`. Moved by the user, it calls
+/// `moved`; `show` moves it without.
+pub struct Slider {
+    pub row: gtk::Box,
+    scale: gtk::Scale,
+    shown: Rc<Cell<u32>>,
+}
+
+impl Slider {
+    pub fn new(icon: &str, name: &str, moved: impl Fn(u32) + 'static) -> Self {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.add_css_class("slider-row");
+        let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+        scale.set_hexpand(true);
+        scale.update_property(&[gtk::accessible::Property::Label(name)]);
+        row.append(&gtk::Image::from_icon_name(icon));
+        row.append(&scale);
+        let shown = Rc::new(Cell::new(u32::MAX));
+        scale.connect_value_changed(glib::clone!(
+            #[strong]
+            shown,
+            move |scale| {
+                let value = scale.value().round() as u32;
+                if value != shown.replace(value) {
+                    moved(value);
+                }
+            }
+        ));
+        Self { row, scale, shown }
+    }
+
+    pub fn show(&self, value: u32) {
+        // Above 100 (set so elsewhere) the slider stops at 100: not a move to 100.
+        self.shown.set(value.min(100));
+        self.scale.set_value(f64::from(value));
     }
 }

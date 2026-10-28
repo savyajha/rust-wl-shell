@@ -12,7 +12,7 @@ use anyhow::Context;
 use gdk4_wayland::prelude::*;
 use gdk4_wayland::{WaylandDisplay, WaylandSurface};
 use gtk4::{self as gtk, gdk, glib, prelude::*};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::{wl_compositor::WlCompositor, wl_region::WlRegion};
@@ -81,16 +81,52 @@ impl Blur {
         }))
     }
 
-    /// Blur behind all of `native` (a bar's window or a popover) while it is mapped.
-    pub fn attach(blur: &Option<Rc<Blur>>, native: &(impl IsA<gtk::Native> + IsA<gtk::Widget>)) {
+    /// Blur behind `native` (a bar's window, a popover, the OSD) while it is mapped: all of
+    /// it, but for corners rounded at `radius` (at most half its height), following its
+    /// size.
+    pub fn attach(
+        blur: &Option<Rc<Blur>>,
+        native: &(impl IsA<gtk::Native> + IsA<gtk::Widget>),
+        radius: i32,
+    ) {
         let Some(blur) = blur.clone() else {
             return;
         };
         let effect: Rc<RefCell<Option<Effect>>> = Rc::default();
+        // A rounded region follows the surface's size; a bar's covers all, whatever it is.
+        if radius > 0 {
+            native.connect_realize(glib::clone!(
+                #[strong]
+                blur,
+                #[strong]
+                effect,
+                move |native| {
+                    let Some(surface) = native.surface() else {
+                        return;
+                    };
+                    let (blur, effect) = (blur.clone(), effect.clone());
+                    let resized = move |surface: &gdk::Surface| {
+                        if let Some(effect) = &*effect.borrow() {
+                            blur.region(effect, surface, radius);
+                        }
+                    };
+                    surface.connect_width_notify(resized.clone());
+                    surface.connect_height_notify(resized);
+                }
+            ));
+        }
         native.connect_map(glib::clone!(
             #[strong]
             effect,
-            move |native| *effect.borrow_mut() = blur.apply(native.upcast_ref())
+            move |native| {
+                *effect.borrow_mut() = blur.apply(native.upcast_ref(), radius);
+                // Bars once each; popovers and the OSD on every showing.
+                if effect.borrow().is_some() && native.has_css_class("bar") {
+                    info!("blur on");
+                } else if effect.borrow().is_some() {
+                    debug!("blur on, for a {}", native.type_().name());
+                }
+            }
         ));
         // Once the surface is gone the effect is inert; destroying it first is only tidy.
         native.connect_unmap(move |_| {
@@ -100,9 +136,9 @@ impl Blur {
         });
     }
 
-    /// Blur behind all of `native`, which must be mapped; the request is applied with GTK's
-    /// next commit.
-    fn apply(&self, native: &gtk::Native) -> Option<Effect> {
+    /// Blur behind `native`, which must be mapped; the request is applied with GTK's next
+    /// commit.
+    fn apply(&self, native: &gtk::Native, radius: i32) -> Option<Effect> {
         // Drains what came since (a later change of capabilities is not followed).
         if let Err(e) = self
             .queue
@@ -111,17 +147,46 @@ impl Blur {
         {
             warn!("blur's Wayland queue: {e}");
         }
-        let surface = native.surface()?.downcast::<WaylandSurface>().ok()?;
+        let surface = native.surface()?;
+        let wayland = surface.downcast_ref::<WaylandSurface>()?;
         let effect = self
             .manager
-            .get_background_effect(&surface.wl_surface()?, &self.qh, ());
-        let region = self.compositor.create_region(&self.qh, ());
-        region.add(0, 0, i32::MAX, i32::MAX);
-        effect.set_blur_region(Some(&region));
-        region.destroy();
-        info!("blur on");
+            .get_background_effect(&wayland.wl_surface()?, &self.qh, ());
+        self.region(&effect, &surface, radius);
         Some(effect)
     }
+
+    /// Set `effect`'s region to `surface` at its size now, with its corners rounded.
+    fn region(&self, effect: &Effect, surface: &gdk::Surface, radius: i32) {
+        let region = self.compositor.create_region(&self.qh, ());
+        if radius == 0 {
+            region.add(0, 0, i32::MAX, i32::MAX);
+        }
+        let (width, height) = (surface.width(), surface.height());
+        let radius = radius.min(width / 2).min(height / 2).max(0);
+        region.add(0, radius, width, height - 2 * radius);
+        // The corners, two rows at a time.
+        for (y, rows, inset) in corner_bands(radius) {
+            region.add(inset, y, width - 2 * inset, rows);
+            region.add(inset, height - y - rows, width - 2 * inset, rows);
+        }
+        effect.set_blur_region(Some(&region));
+        region.destroy();
+    }
+}
+
+/// A corner rounded at `radius` as bands of two rows, top down: (first row, rows, how far
+/// in the circle starts at the band's middle). Three bands showed as steps on the OSD's
+/// pill; two rows do not.
+fn corner_bands(radius: i32) -> Vec<(i32, i32, i32)> {
+    let r = f64::from(radius);
+    let band = |top: i32| {
+        let rows = 2.min(radius - top);
+        let dy = r - f64::from(top) - f64::from(rows) / 2.0;
+        let inset = (r - (r * r - dy * dy).sqrt()).round() as i32;
+        (top, rows, inset)
+    };
+    (0..radius).step_by(2).map(band).collect()
 }
 
 /// Whether the compositor can blur, from the manager's capabilities event.
@@ -162,3 +227,17 @@ impl Dispatch<WlRegistry, GlobalListContents> for Capabilities {
 delegate_noop!(Capabilities: WlCompositor);
 delegate_noop!(Capabilities: WlRegion);
 delegate_noop!(Capabilities: ExtBackgroundEffectSurfaceV1);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corners_narrow_towards_the_edge() {
+        assert_eq!(corner_bands(0), Vec::new());
+        let bands = corner_bands(10);
+        assert_eq!(bands.len(), 5);
+        assert_eq!((bands[0], bands[4]), ((0, 2, 6), (8, 2, 0)));
+        assert_eq!(corner_bands(3), [(0, 2, 1), (2, 1, 0)]);
+    }
+}

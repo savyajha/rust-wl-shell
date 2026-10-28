@@ -1,18 +1,19 @@
 //! One output's bar: its workspaces and the focused app on the left; the keyboard layout,
-//! the power profile, the battery and the clock on the right.
+//! the power profile, the brightness, the volume, the battery and the clock on the right.
 
 use std::rc::Rc;
 
 use gtk4::{self as gtk, gdk, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::{Component, ComponentParts, ComponentSender};
-use shell_core::Update;
 use shell_core::config::{Config, Position};
 use shell_core::niri::{self, Workspace};
+use shell_core::{Update, audio};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::blur::Blur;
 use crate::items::{BatteryItem, LayoutItem, ProfileItem};
+use crate::sliders::{BrightnessItem, VolumeItem};
 
 pub struct Bar {
     /// Its connector is the output's name, as niri names outputs.
@@ -26,6 +27,8 @@ pub struct Bar {
     /// Each one `None` when the config switches it off.
     layout: Option<LayoutItem>,
     profile: Option<ProfileItem>,
+    brightness: Option<BrightnessItem>,
+    volume: Option<VolumeItem>,
     battery: Option<BatteryItem>,
 }
 
@@ -35,6 +38,9 @@ pub struct Init {
     pub niri: UnboundedSender<niri::Command>,
     /// The power profile to set.
     pub profiles: UnboundedSender<String>,
+    pub audio: audio::Requests,
+    /// The backlight's level to set.
+    pub brightness: UnboundedSender<u8>,
     pub blur: Option<Rc<Blur>>,
 }
 
@@ -116,15 +122,21 @@ impl Component for Bar {
                 .then(|| LayoutItem::new(init.niri.clone(), &init.blur)),
             profile: (config.power_profile)
                 .then(|| ProfileItem::new(init.profiles.clone(), &init.blur)),
+            brightness: (config.brightness)
+                .then(|| BrightnessItem::new(init.brightness.clone(), &init.blur)),
+            volume: (config.volume).then(|| VolumeItem::new(init.audio.clone(), &init.blur)),
             battery: (config.battery)
                 .then(|| BatteryItem::new(config.battery_percentage, &init.blur)),
         };
         let widgets = view_output!();
         let layout = model.layout.as_ref().map(|item| &item.item.button);
         let profile = model.profile.as_ref().map(|item| &item.item.button);
+        let brightness = model.brightness.as_ref().map(|item| &item.item.button);
+        let volume = model.volume.as_ref().map(|item| &item.item.button);
         let battery = model.battery.as_ref().map(|item| &item.item.button);
         // Before the clock, in this order.
-        for button in [layout, profile, battery].into_iter().flatten() {
+        let buttons = [layout, profile, brightness, volume, battery];
+        for button in buttons.into_iter().flatten() {
             button.insert_before(&widgets.right, Some(&widgets.clock));
         }
         ComponentParts { model, widgets }
@@ -148,6 +160,16 @@ impl Component for Bar {
             Msg::Update(Update::Battery(battery)) => {
                 if let Some(item) = &self.battery {
                     item.show(battery.as_ref());
+                }
+            }
+            Msg::Update(Update::Audio(audio)) => {
+                if let Some(item) = &self.volume {
+                    item.show(audio.as_ref());
+                }
+            }
+            Msg::Update(Update::Backlight(level)) => {
+                if let Some(item) = &self.brightness {
+                    item.show(level);
                 }
             }
             Msg::Update(Update::Profiles(profiles)) => {
@@ -205,5 +227,18 @@ impl Bar {
             });
             row.append(&button);
         }
+    }
+}
+
+impl Bar {
+    /// Whether this bar's volume and brightness popovers are open, where the user moves
+    /// their sliders.
+    pub fn sliders_open(&self) -> (bool, bool) {
+        let open =
+            |item: Option<&crate::popover::Item>| item.is_some_and(|i| i.popover.is_visible());
+        (
+            open(self.volume.as_ref().map(|v| &v.item)),
+            open(self.brightness.as_ref().map(|b| &b.item)),
+        )
     }
 }

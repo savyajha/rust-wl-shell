@@ -25,10 +25,10 @@ def click(x, y):
         input_events({"type": "btn", "data": {"down": down, "button": "left"}})
         time.sleep(0.1)
 
-def screen():
-    """The screen from QEMU's screendump: its width and its RGB bytes."""
+def screen(head=0):
+    """An output (head 0: Virtual-1) from QEMU's screendump: its width and its RGB bytes."""
     path = machine.out_dir / "screen.ppm"
-    machine.send_monitor_command(f"screendump {path} gpu 0")
+    machine.send_monitor_command(f"screendump {path} gpu {head}")
     data = path.read_bytes()
     header = re.match(rb"P6\s+(\d+)\s+(\d+)\s+\d+\s", data)
     assert header is not None

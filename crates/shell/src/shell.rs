@@ -8,18 +8,23 @@ use gio_unix::DesktopAppInfo;
 use gtk4::{gdk, gio, glib, prelude::*};
 use relm4::{Component, ComponentController, Controller};
 use shell_core::config::Config;
-use shell_core::{Core, Update, niri};
+use shell_core::{Core, Update, audio, niri};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
 use crate::Marks;
 use crate::bar::{self, Bar, Msg};
 use crate::blur::Blur;
+use crate::osd::Osd;
+use crate::sliders::{self, BRIGHTNESS};
 
 struct Shell {
     config: Rc<Config>,
     niri: UnboundedSender<niri::Command>,
     profiles: UnboundedSender<String>,
+    audio: audio::Requests,
+    brightness: UnboundedSender<u8>,
+    osd: Option<Osd>,
     blur: Option<Rc<Blur>>,
     bars: Vec<(gdk::Monitor, Controller<Bar>)>,
     /// The last update of each kind, for bars added later.
@@ -41,12 +46,18 @@ pub fn start(
         mut updates,
         niri,
         profiles,
+        audio,
+        brightness,
     } = core;
+    let blur = Blur::new(display).map(Rc::new);
     let shell = Rc::new(RefCell::new(Shell {
-        config: Rc::new(config),
         niri,
         profiles,
-        blur: Blur::new(display).map(Rc::new),
+        audio,
+        brightness,
+        osd: config.osd.then(|| Osd::new(&blur)),
+        config: Rc::new(config),
+        blur,
         bars: Vec::new(),
         latest: Vec::new(),
         app: String::new(),
@@ -96,10 +107,12 @@ impl Shell {
                 config: self.config.clone(),
                 niri: self.niri.clone(),
                 profiles: self.profiles.clone(),
+                audio: self.audio.clone(),
+                brightness: self.brightness.clone(),
                 blur: self.blur.clone(),
             })
             .detach();
-        Blur::attach(&self.blur, bar.widget());
+        Blur::attach(&self.blur, bar.widget(), 0);
         for update in &self.latest {
             bar.emit(Msg::Update(update.clone()));
         }
@@ -121,10 +134,53 @@ impl Shell {
         for (_, bar) in &self.bars {
             bar.emit(Msg::Update(update.clone()));
         }
+        self.show_osd(&update);
         let kind = mem::discriminant(&update);
         self.latest
             .retain(|latest| mem::discriminant(latest) != kind);
         self.latest.push(update);
+    }
+
+    /// The OSD, for a change of volume, mute or brightness from outside the shell: not the
+    /// first value (at start-up, or when the service comes back), not a switch of output,
+    /// and not while that item's popover is open on a bar, where the user moves its slider.
+    fn show_osd(&self, update: &Update) {
+        let Some(osd) = &self.osd else {
+            return;
+        };
+        let before = self
+            .latest
+            .iter()
+            .find(|latest| mem::discriminant(*latest) == mem::discriminant(update));
+        let open = self.bars.iter().map(|(_, bar)| bar.model().sliders_open());
+        let (volume_open, brightness_open) =
+            open.fold((false, false), |a, b| (a.0 || b.0, a.1 || b.1));
+        let (icon, level) = match (before, update) {
+            // A switch of output (here or elsewhere) is not a change of volume.
+            (Some(Update::Audio(Some(before))), Update::Audio(Some(audio)))
+                if !volume_open
+                    && before.default == audio.default
+                    && (before.volume, before.muted) != (audio.volume, audio.muted) =>
+            {
+                (sliders::volume_icon(audio), audio.volume)
+            }
+            (Some(Update::Backlight(Some(before))), Update::Backlight(Some(level)))
+                if !brightness_open && before != level =>
+            {
+                (BRIGHTNESS, u32::from(*level))
+            }
+            _ => return,
+        };
+        let focused = self.latest.iter().find_map(|latest| match latest {
+            Update::Niri(snapshot) => snapshot.focused_output.clone(),
+            _ => None,
+        });
+        let monitor = self
+            .bars
+            .iter()
+            .map(|(monitor, _)| monitor)
+            .find(|monitor| focused.is_some() && monitor.connector().map(String::from) == focused);
+        osd.show(icon, level, monitor);
     }
 }
 

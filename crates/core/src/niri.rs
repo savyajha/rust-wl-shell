@@ -25,6 +25,8 @@ pub struct Snapshot {
     /// one in use.
     pub layouts: Vec<String>,
     pub layout: u8,
+    /// The output with the focused workspace.
+    pub focused_output: Option<String>,
 }
 
 /// What the bars ask niri for.
@@ -61,13 +63,19 @@ impl Snapshot {
             })
             .collect();
         workspaces.sort_by(|a, b| (&a.output, a.idx).cmp(&(&b.output, b.idx)));
-        let focused = state.windows.windows.values().find(|w| w.is_focused);
+        let window = state.windows.windows.values().find(|w| w.is_focused);
         let layouts = state.keyboard_layouts.keyboard_layouts.as_ref();
+        let focused = state
+            .workspaces
+            .workspaces
+            .values()
+            .find(|ws| ws.is_focused);
         Self {
             workspaces,
-            app_id: focused.and_then(|w| w.app_id.clone()),
+            app_id: window.and_then(|w| w.app_id.clone()),
             layouts: layouts.map(|l| l.names.clone()).unwrap_or_default(),
             layout: layouts.map_or(0, |l| l.current_idx),
+            focused_output: focused.and_then(|ws| ws.output.clone()),
         }
     }
 }

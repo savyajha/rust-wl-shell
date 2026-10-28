@@ -42,6 +42,16 @@ pub struct Config {
     /// Shown only with two layouts or more.
     #[knuffel(child, unwrap(argument), default = true)]
     pub keyboard_layout: bool,
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub volume: bool,
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub brightness: bool,
+    /// The level shown on screen when volume or brightness change from outside the shell.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub osd: bool,
+    /// The backlight device (in /sys/class/backlight), else the first.
+    #[knuffel(child, unwrap(argument))]
+    pub backlight: Option<String>,
 }
 
 #[derive(knuffel::DecodeScalar, Clone, Copy, Debug, Default, PartialEq)]
@@ -92,6 +102,14 @@ impl Config {
                 config.height
             );
         }
+        let path = config
+            .backlight
+            .as_deref()
+            .is_some_and(|name| name.contains('/'));
+        ensure!(
+            !path,
+            "backlight is a device's name in /sys/class/backlight, not a path"
+        );
         let invalid = StrftimeItems::new(&config.clock_format).any(|item| item == Item::Error);
         ensure!(!invalid, "clock-format is not a valid strftime format");
         Ok(config)
@@ -139,6 +157,8 @@ mod tests {
         assert!(config.workspaces && config.app_name);
         assert!(config.battery && config.power_profile && config.keyboard_layout);
         assert!(!config.battery_percentage);
+        assert!(config.volume && config.brightness && config.osd);
+        assert_eq!(config.backlight, None);
         let sizes = Sizes {
             height: 24,
             font: 13,
@@ -178,6 +198,10 @@ mod tests {
             battery-percentage true
             power-profile false
             keyboard-layout false
+            volume false
+            brightness false
+            osd false
+            backlight "amdgpu_bl1"
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
         assert_eq!(
@@ -196,6 +220,10 @@ mod tests {
                 battery_percentage: true,
                 power_profile: false,
                 keyboard_layout: false,
+                volume: false,
+                brightness: false,
+                osd: false,
+                backlight: Some("amdgpu_bl1".into()),
             }
         );
     }
@@ -219,6 +247,7 @@ mod tests {
             ),
             ("position \"left\"", "expected one of `top`, `bottom`"),
             ("workspaces \"no\"", "expected boolean"),
+            ("backlight \"../x\"", "not a path"),
             (
                 "clock-format \"%Q\"",
                 "clock-format is not a valid strftime",

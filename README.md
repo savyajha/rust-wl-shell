@@ -43,6 +43,10 @@ battery true
 battery-percentage false
 power-profile true
 keyboard-layout true
+volume true
+brightness true
+osd true
+backlight "amdgpu_bl1"
 ```
 
 | Key | Default | |
@@ -60,15 +64,24 @@ keyboard-layout true
 | `battery-percentage` | `false` | Show the battery's percentage next to its icon. |
 | `power-profile` | `true` | Show the power profile (power-profiles-daemon's), when the daemon runs. |
 | `keyboard-layout` | `true` | Show the keyboard layout (niri's), when there are two or more. |
+| `volume` | `true` | Show the volume (the default output's, through PipeWire's pulse server or PulseAudio). |
+| `brightness` | `true` | Show the backlight's brightness, when there is a backlight. |
+| `osd` | `true` | Show the volume or brightness on screen when it changes from outside the shell. |
+| `backlight` | the first | The backlight device to follow, by its name in `/sys/class/backlight`. |
 
 The four sizes follow the height unless set, in macOS's proportions at 24 px; each must be
 at most the height. The clock is redrawn on each minute and after a resume from sleep.
 
-The items on the right, right to left after the clock: the battery, the power profile,
-the keyboard layout. Each is a symbolic icon from the icon theme (the layout is its short
+The items on the right, right to left after the clock: the battery, the volume, the
+brightness, the power profile, the keyboard layout. Each is a symbolic icon from the icon theme (the layout is its short
 name, as GNOME has it, in upper case: "EN", "DE") and opens a popover under it: the battery's percentage, state and time
-left; the power profiles to choose from; the layouts to choose from. A click outside or
-Escape closes it.
+left; the volume's slider, a mute check and the outputs to choose from; the brightness's
+slider; the power profiles to choose from; the layouts to choose from. A click outside or
+Escape closes it. The brightness is set through logind, which needs no permission.
+
+The OSD, a pill near the bottom of the focused output, shows the volume or brightness
+for 1.5 s when it changes from outside the shell (the keys, wpctl, brightnessctl), not
+when the shell's own slider moves it.
 
 The text is in the system font (GTK's `gtk-font-name`, from GSettings). The look is fixed
 for now: a translucent dark tint, white text, and the compositor's blur behind it, which

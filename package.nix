@@ -6,6 +6,7 @@
   gsettings-desktop-schemas,
   gtk4,
   gtk4-layer-shell,
+  libpulseaudio,
   xkeyboard_config,
 }:
 
@@ -39,6 +40,8 @@ rustPlatform.buildRustPackage {
     gsettings-desktop-schemas
     gtk4
     gtk4-layer-shell
+    # libpulse, for the volume (crates/core/src/audio.rs).
+    libpulseaudio
   ];
 
   # The keyboard layouts' short names (crates/core/src/xkb.rs).

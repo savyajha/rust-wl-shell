@@ -2,6 +2,8 @@
 //! on its own thread, sends each service's state to the UI as a whole snapshot, and takes
 //! the UI's commands.
 
+pub mod audio;
+pub mod backlight;
 mod bus;
 pub mod clock;
 pub mod config;
@@ -25,6 +27,10 @@ pub enum Update {
     Battery(Option<upower::Battery>),
     /// `None`: no power-profiles-daemon.
     Profiles(Option<power_profiles::Profiles>),
+    /// `None`: no audio server, or no default output.
+    Audio(Option<audio::Audio>),
+    /// The backlight's level in percent; `None`: no backlight.
+    Backlight(Option<u8>),
 }
 
 /// The core's side of the channels.
@@ -34,13 +40,19 @@ pub struct Core {
     pub niri: UnboundedSender<niri::Command>,
     /// The power profile to set: one of `power_profiles::PROFILES`.
     pub profiles: UnboundedSender<String>,
+    pub audio: audio::Requests,
+    /// The backlight's level to set, in percent.
+    pub brightness: UnboundedSender<u8>,
 }
 
-/// Start the core's thread.
-pub fn start(clock_format: String) -> Core {
+/// Start the core's thread, and the audio's; `backlight` names the backlight to follow,
+/// else the first.
+pub fn start(clock_format: String, backlight: Option<String>) -> Core {
     let (update_tx, updates) = mpsc::unbounded_channel();
     let (niri, niri_rx) = mpsc::unbounded_channel();
     let (profiles, profile_rx) = mpsc::unbounded_channel();
+    let (brightness, brightness_rx) = mpsc::unbounded_channel();
+    let audio = audio::start(update_tx.downgrade());
     thread::Builder::new()
         .name("core".into())
         .spawn(move || {
@@ -49,41 +61,35 @@ pub fn start(clock_format: String) -> Core {
                 .build()
                 .expect("starting tokio");
             // Dropping the runtime ends the other services too, which closes `updates`.
-            runtime.block_on(run(clock_format, update_tx, niri_rx, profile_rx));
+            runtime.block_on(async move {
+                let (bus_tx, bus_rx) = oneshot::channel();
+                tokio::spawn(clock::run(clock_format, update_tx.clone(), bus_rx));
+                let updates = update_tx.clone();
+                // The services on the system bus share one connection, which the clock gets
+                // too. The backlight is read without it, but set through it.
+                tokio::spawn(async move {
+                    let bus = bus::system().await;
+                    let _ = bus_tx.send(bus.clone());
+                    let followed =
+                        backlight::run(backlight, bus.clone(), updates.clone(), brightness_rx);
+                    tokio::spawn(followed);
+                    let Some(bus) = bus else {
+                        return;
+                    };
+                    tokio::spawn(upower::run(bus.clone(), updates.clone()));
+                    power_profiles::run(bus, updates, profile_rx).await;
+                });
+                if let Err(e) = niri::run(update_tx, niri_rx).await {
+                    error!("{e:#}");
+                }
+            });
         })
         .expect("starting the core's thread");
     Core {
         updates,
         niri,
         profiles,
+        audio,
+        brightness,
     }
-}
-
-async fn run(
-    clock_format: String,
-    updates: UnboundedSender<Update>,
-    niri_rx: UnboundedReceiver<niri::Command>,
-    profile_rx: UnboundedReceiver<String>,
-) {
-    let (bus_tx, bus_rx) = oneshot::channel();
-    tokio::spawn(clock::run(clock_format, updates.clone(), bus_rx));
-    tokio::spawn(system_services(updates.clone(), bus_tx, profile_rx));
-    if let Err(e) = niri::run(updates, niri_rx).await {
-        error!("{e:#}");
-    }
-}
-
-/// The services on the system bus, sharing one connection, which the clock gets too.
-async fn system_services(
-    updates: UnboundedSender<Update>,
-    clock_bus: oneshot::Sender<Option<zbus::Connection>>,
-    profile_requests: UnboundedReceiver<String>,
-) {
-    let bus = bus::system().await;
-    let _ = clock_bus.send(bus.clone());
-    let Some(bus) = bus else {
-        return;
-    };
-    tokio::spawn(upower::run(bus.clone(), updates.clone()));
-    power_profiles::run(bus, updates, profile_requests).await;
 }

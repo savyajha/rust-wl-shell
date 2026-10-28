@@ -2,19 +2,21 @@
 
 rust-wl-shell is a macOS-style bar for niri: a bar on every output with the output's
 workspaces and the focused app's name on the left; the keyboard layout, the power
-profile, the battery and the clock on the right, each item with its own popover.
+profile, the brightness, the volume, the battery and the clock on the right, each item
+with its own popover; and an on-screen display (OSD) for volume and brightness.
 
 ## Crates
 
 - `crates/core` (`shell_core`): plain Rust, no GTK. The services (niri, the clock,
-  UPower, power-profiles-daemon), the state they produce, and the config. It runs a current-thread tokio runtime on its own
-  thread (`shell_core::start`).
+  UPower, power-profiles-daemon, the backlight, the audio), the state they produce, and
+  the config. It runs a current-thread tokio runtime on its own thread
+  (`shell_core::start`); the audio has a thread of its own (below).
 - `crates/shell` (binary `rust-wl-shell`): the GTK4 + relm4 UI, on GTK's main loop.
 
 The two talk over tokio channels with data only. The core sends `Update`s, each a whole
-snapshot of one service (`Niri`, `Clock`, `Battery`, `Profiles`); the UI sends
-`Command`s back (`Niri(FocusWorkspace | SwitchLayout)`, `SetProfile`), which the core
-routes to the service's task. The UI awaits the update channel from a GLib future;
+snapshot of one service (`Niri`, `Clock`, `Battery`, `Profiles`, `Audio`,
+`Backlight`); the UI sends requests back on one sender per service (`Core::niri`,
+`profiles`, `audio`, `brightness`). The UI awaits the update channel from a GLib future;
 tokio's channels need no runtime on the receiving side.
 
 ## niri
@@ -68,6 +70,53 @@ service not running is `None`, and the item hides.
   layout's). The file's path is set at build time (`XKB_EVDEV_XML`); without it, or for
   a layout it does not list, the short name is the description's first two letters.
 
+## Audio
+
+`audio.rs` follows the default output (sink) over the PulseAudio protocol, which
+pipewire-pulse serves, as the toolkit ADR has it: the default sink's volume (its
+loudest channel, in percent of libpulse's normal volume, as pactl and wpctl show it)
+and mute, and the outputs to choose from. Only hardware outputs are listed:
+pipewire-pulse flags a sink `HARDWARE` unless its node is virtual, which leaves out
+EasyEffects' sink and other filters. Requests set the default sink's volume (its
+channels scaled so that the loudest is at the level, at most 100 %, which keeps their
+balance), its mute, or the default sink.
+
+**libpulse-binding, not the pure-Rust `pulseaudio` crate.** The `pulseaudio` crate
+(0.3.2) has an async client for lists, server info and the default sink, but its
+public client has no volume, mute or subscription: those would be written against its
+protocol layer, over a blocking connection of our own, next to the client's own reactor
+thread. libpulse-binding has all four (subscribe, `set_sink_volume_by_name`,
+`set_sink_mute_by_name`, `set_default_sink`) with no `unsafe` in our code, at the cost
+of the C library and of its main loop, which is not `Send`. The choice was not close.
+
+libpulse's standard main loop runs on a thread of its own, and everything that touches
+it stays there, in `Rc`s: the subscription callback marks the state changed, and the
+loop then reads the server's default sink and every sink (one round of two queries),
+keeps the default sink's channel volumes, and sends the snapshot when it changed.
+Requests from the UI go into a channel, with a byte on a socket pair whose other end the
+main loop watches as one of its own I/O events, so no thread polls; requests queued
+while there was no connection are dropped when one is made, as they may be for a sink
+that is no longer the default. The thread holds the update sender weakly, so that the
+shell's updates still close when the core stops. Without a server (or when it goes
+away) the thread sends `None` and connects again every 2 s, logging each error once
+while it repeats.
+
+## The backlight
+
+`backlight.rs` reads `/sys/class/backlight/<device>` (the config's `backlight`, a name,
+not a path; else the one systemd-backlight and GNOME would pick: by `type`, firmware,
+then platform, then raw, then by name): `brightness` of `max_brightness`, in linear percent as brightnessctl
+shows it. It follows changes through the kernel's `sysfs_notify` on
+`actual_brightness`, which the backlight core raises on every write, by any writer
+(brightnessctl, logind, the keys): the file is polled for `POLLPRI` with tokio's
+`AsyncFd` and read again to rearm it. This is the same kernel event udev's `change`
+uevent is sent with (D2 named udev); reading it from sysfs needs no libudev. A level is
+set with logind's `Session.SetBrightness` on `session/auto` (the caller's session, else
+its user's graphical one), which needs no permission beyond being the session's user;
+never below 1 %, as 0 turns the backlight off on many panels. After an error it tries
+again every 5 s, warning once while the error repeats; only a device that went away (a
+driver reloaded) hides the item, until it is back.
+
 ## The bars
 
 `shell.rs` keeps one bar per `gdk::Monitor` in the display's monitor list, and follows
@@ -106,7 +155,7 @@ row at once, and a choice the service refuses (polkit, for one) sends no update,
 rows keep showing the service's state until an update rebuilds them. Each item has an accessible name that says its state
 ("Battery 50%, on battery", "Power profile: Balanced").
 
-`items.rs` has the three items:
+`items.rs` has three items, `sliders.rs` two more:
 
 - the battery: the theme's `battery-level-N[-charging]-symbolic` by tens (charged when
   full on mains), the percentage beside it only with `battery-percentage`; the popover
@@ -116,26 +165,51 @@ rows keep showing the service's state until an update rebuilds them. Each item h
 - the keyboard layout: its short name in upper case, as macOS shows it ("EN", "DE"),
   shown only with two layouts or more; the popover lists them, and a choice is niri's
   `SwitchLayout`.
+- the volume: `audio-volume-{muted,low,medium,high}-symbolic` (muted at 0 or muted,
+  then by thirds); the popover has a slider (0–100 %), a Mute check, and the hardware
+  outputs as radio rows, a choice making that output the default.
+- the brightness: `display-brightness-symbolic`, hidden with no backlight; the popover
+  has a slider.
+
+A slider (`popover::Slider`) sends a request for each whole percent the user moves it
+to; an update moves it without sending (it remembers the value it shows, and a level
+above 100 % stops it at 100 without that counting as a move).
+
+### The OSD
+
+`osd.rs` is vibepanel's look and numbers, not its code: one window on the overlay layer
+(namespace `rust-wl-shell-osd`), anchored to the bottom 48 px above the edge, with no
+exclusive zone, no keyboard and an empty input region, on the focused output (niri's
+focused workspace's output). It is a frosted pill (padding 10 by 16 px) holding the icon
+at 1.5 times `icon-size`, a 200 px level with no knob, and the value, and it hides 1.5 s
+after the last showing. `shell.rs` shows it for a change of volume, mute or brightness
+between two updates of the same service: not for the first (at start-up, or when the
+service comes back), not for a switch of the default output (here or elsewhere, as on
+macOS), and not while that item's popover is open on a bar (it asks each bar), where the
+user moves the slider. With its output switched off, it shows on the focused one left.
 
 ### Look
 
 `style.css` is fixed: a 0.35 black tint, white text, hollow dots and a filled active
 one, the app name at weight 600; popovers have the same tint, a 10 px radius and a thin
-white outline, with no shadow, so that the surface is the popover's own rectangle. Its sizes are CSS variables (`--height`,
-`--font-size`, `--icon-size`, `--spacing`, `--dot-size`), set by one generated rule on
-`window.bar` from the config (`main.rs`, `stylesheet`). The font family is the system's
+white outline, with no shadow, so that the surface is the popover's own rectangle;
+sliders and the OSD's level are a white bar on a faint track. Its sizes are CSS
+variables (`--height`, `--font-size`, `--icon-size`, `--spacing`, `--dot-size`), set by
+one generated rule on `window.bar` and `window.osd` from the config (`main.rs`, `stylesheet`). The font family is the system's
 (`gtk-font-name`).
 
 ### Blur
 
 `blur.rs` makes our own event queue on GDK's Wayland connection (from gdk4-wayland),
 binds `ext_background_effect_manager_v1`, and reads its capabilities with one round
-trip: without blur among them, there is none. Each bar's window and each popover asks
-for blur behind its whole `wl_surface` when it is mapped (logging `blur on`); the
-request takes effect with GTK's next commit. The effect object is destroyed when it is
-unmapped. niri blurs popovers' surfaces too; as the region is the whole rectangle, the
-blur shows a little past the popover's rounded corners. The
-queue is drained on each request; a later change of capabilities is not followed. GTK 4.23.3 and later bind
+trip: without blur among them, there is none. Each bar's window, each popover and the
+OSD asks for blur behind its `wl_surface` when it is mapped (logging `blur on` at info
+for bars, at debug for the others, which map on every showing); the request takes effect
+with GTK's next commit. A bar's region is all of it; a popover's and the OSD's are
+their surface with its corners rounded (10 px, and half the height for the OSD's pill),
+two rows of pixels at a time, so that the blur does not show past the corners, and set
+again whenever the surface's width or height changes. The effect object is destroyed when it is
+unmapped. The queue is drained on each request; a later change of capabilities is not followed. GTK 4.23.3 and later bind
 the protocol themselves (a second object is a protocol error), so there the shell logs
 that blur is not supported yet; that path (blur nodes in the snapshot) is to be built
 when the system's GTK reaches it.
@@ -240,6 +314,15 @@ run on the system bus. The test checks:
     again; its icon and name follow a change; hidden when UPower reports no battery
 12. after each popover closes (a choice, or Escape), the bar asks for no keyboard again
     (`niri msg layers`)
+13. the volume (PipeWire with pipewire-pulse, two emulated HDA sound cards, and a
+    virtual null sink as EasyEffects' is): no OSD at start-up; `wpctl set-volume` moves
+    the item and shows the OSD, which hides after 1.5 s; the popover lists the two
+    hardware outputs, not the virtual one; a drag on its slider sets the volume (pactl)
+    and shows no OSD; choosing the other output makes it the default, with no OSD;
+    `wpctl set-mute` mutes the item and shows the OSD; after a restart of
+    pipewire-pulse the item comes back. The VM has no backlight: no brightness item.
+14. the OSD shows on the focused output (Virtual-2), not on the other; with Virtual-2
+    switched off, it shows on Virtual-1 (pixels of each output's bottom middle)
 
 Items and popover rows are found by their pixels (white on the tint, apart by gaps),
 not by AT-SPI's extents, which in this VM are off by about 17 px from where GTK lays
