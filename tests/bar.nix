@@ -34,6 +34,7 @@
 #      no OSD; an outside mute shows the OSD; the server restarted, the item comes back.
 #      No backlight in the VM: no brightness item.
 #  13. the OSD shows on the focused output; with that output switched off, on another
+#  14. a popover's arrow points at its item: drawn, blurred within, and not beside it
 
 {
   pkgs,
@@ -53,6 +54,19 @@ let
     Type=Application
     Name=Alpha Test
     Exec=foot --app-id org.test.Alpha
+  '';
+
+  # Stripes, 8 px white and 8 px black, for a background a blur smooths (a PNG made here).
+  stripes = pkgs.runCommand "stripes.png" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+    python3 - <<'PY'
+    import struct, zlib
+    row = b"\0" + (b"\xff" * 24 + b"\0" * 24)
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 16, 16, 8, 2, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(row * 16)) + chunk(b"IEND", b"")
+    open("${placeholder "out"}", "wb").write(png)
+    PY
   '';
 
   # niri's socket for a second shell: it answers the event-stream request, then closes.
@@ -385,6 +399,38 @@ pkgs.testers.runNixOSTest {
             lambda t: bars(t) == 2 and t.count(["button", "Workspace 1"]) == 2,
             "two bars again, each with its workspace",
         )
+
+    with subtest("a popover's arrow points at its item, and is blurred, not beside it"):
+        # A striped background (niri's grey would hide a blur).
+        spawn("${pkgs.swaybg}/bin/swaybg -i ${stripes} -m tile")
+        time.sleep(2)
+        first, last = right_items()[1]
+        x = (first + last) // 2
+        before = screen()
+        click_item(1)
+        time.sleep(1)
+        move(100, 700)
+        time.sleep(0.5)
+        after = screen()
+        machine.send_monitor_command(f"screendump {machine.out_dir}/arrow.ppm gpu 0")
+        machine.send_key("esc")
+        retry(lambda _: keyboard_free(), 10)
+        # GTK's arrow: 12 px from the button's bottom (2 px above the bar's) to the
+        # contents, 24 px wide at its base, its tip at the button's middle.
+        base = HEIGHT + 10
+        rows = [pixel(after, x, y) for y in range(HEIGHT + 1, base)]
+        assert all(p != pixel(before, x, y) for p, y in zip(rows, range(HEIGHT + 1, base))), rows
+        # Beside it, the desktop as it was: no tint, no blur.
+        for dx in (-20, 20):
+            for y in range(HEIGHT + 1, HEIGHT + 5):
+                assert pixel(after, x + dx, y) == pixel(before, x + dx, y), (dx, y)
+        # In it, near its base, the stripes are smoothed.
+        def spread(shot):
+            values = [sum(pixel(shot, x + dx, base - 2)) for dx in range(-6, 7)]
+            return max(values) - min(values)
+        assert spread(before) > 300 and spread(after) < spread(before) // 3, (
+            spread(before), spread(after))
+        machine.succeed("pkill swaybg")
 
     with subtest("niri's IPC closing ends the shell"):
         machine.succeed(f"{PREFIX} ${fakeNiri} ${runtimeDir}/fake-niri.sock >/dev/null 2>&1 &")

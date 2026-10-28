@@ -8,7 +8,8 @@
 # Behaviours asserted:
 #   1. the network item follows NM: offline, then each network joined
 #   2. the Wi-Fi popover lists the networks in range under "Other Networks", then the
-#      known ones above, the current one checked
+#      known ones above, the current one checked; with many networks the list scrolls,
+#      and the popover stays inside the output
 #   3. joining the open network takes a click
 #   4. joining the WPA2 one asks for its password in the dialog (on the focused output,
 #      with the keyboard): a wrong one shows the error in it, the right one joins and closes
@@ -34,6 +35,7 @@
 }:
 
 let
+  inherit (pkgs) lib;
   session = import ./session.nix { inherit pkgs homeManager module; };
   inherit (session) user;
   fakes = import ./fake-services.nix { inherit pkgs; };
@@ -52,17 +54,25 @@ let
     "alice" PEAP,TTLS
     "alice" MSCHAPV2,TTLS-MSCHAPV2,TTLS-PAP "campus-pass" [2]
   '';
-  ap = name: text: pkgs.writeText "${name}.conf" ''
-    driver=nl80211
-    hw_mode=g
-    channel=1
-    ${text}
-  '';
+  # Each radio also has seven open networks, "Extra N-M", so that the list overflows.
+  ap = radio: text: pkgs.writeText "wlan${radio}.conf" (
+    ''
+      driver=nl80211
+      hw_mode=g
+      channel=1
+      interface=wlan${radio}
+      ${text}
+    ''
+    + lib.concatMapStrings (m: ''
+      bss=wlan${radio}_${toString m}
+      ssid=Extra ${radio}-${toString m}
+      bssid=02:00:00:00:0${radio}:0${toString m}
+    '') (lib.range 1 7)
+  );
   aps = pkgs.linkFarm "access-points" [
     {
       name = "home.conf";
-      path = ap "home" ''
-        interface=wlan1
+      path = ap "1" ''
         ssid=Home
         wpa=2
         wpa_key_mgmt=WPA-PSK
@@ -72,15 +82,13 @@ let
     }
     {
       name = "cafe.conf";
-      path = ap "cafe" ''
-        interface=wlan2
+      path = ap "2" ''
         ssid=Cafe
       '';
     }
     {
       name = "campus.conf";
-      path = ap "campus" ''
-        interface=wlan3
+      path = ap "3" ''
         ssid=Campus
         wpa=2
         wpa_key_mgmt=WPA-EAP
@@ -246,10 +254,35 @@ pkgs.testers.runNixOSTest {
         other_networks()
         wait_for_tree(has("radio button", "Campus"), "the networks in range")
         rows = [n for r, n in tree() if r == "radio button"]
-        assert set(rows) == {"Home", "Cafe", "Campus"}, rows
+        assert {"Home", "Cafe", "Campus"} <= set(rows), rows
         machine.send_monitor_command(f"screendump {machine.out_dir}/wifi-others.ppm gpu 0")
 
+    with subtest("many networks: the list scrolls, and the popover fits the output"):
+        # The popover still open, with "Other Networks".
+        wait_for_tree(has("radio button", "Extra 3-7"), "the extra networks")
+        rows = [n for r, n in tree() if r == "radio button"]
+        assert len(rows) == 24, rows
+        move(100, 700)
+        time.sleep(0.5)
+        shot = screen()
+        machine.send_monitor_command(f"screendump {machine.out_dir}/wifi-many.ppm gpu 0")
+        # The output's bottom rows are niri's grey: the popover ends above them.
+        assert all(is_grey(pixel(shot, x, 760)) for x in range(500, 1024)), "off the output"
+        # A wheel over the list scrolls it: the popover's pixels change.
+        move(800, 300)
+        time.sleep(0.5)
+        shot = screen()
+        for _ in range(10):
+            input_events({"type": "btn", "data": {"down": True, "button": "wheel-down"}},
+                         {"type": "btn", "data": {"down": False, "button": "wheel-down"}})
+        time.sleep(0.5)
+        scrolled = screen()
+        assert scrolled[1] != shot[1], "the list did not scroll"
+        item(("Wi-Fi", "Network"))
+        typing_reaches_the_window("after-many")
+
     with subtest("an open network joins with a click"):
+        other_networks()
         act("Cafe")
         joined("Cafe")
         typing_reaches_the_window("after-cafe")

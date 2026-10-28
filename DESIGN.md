@@ -256,7 +256,8 @@ never built.
 
 `popover.rs` is the component every item is built on: a `GtkMenuButton` (flat, with the
 greeter's chip plate while hovered or open) whose `GtkPopover` GTK places under it,
-closes on an outside click (so one is open at a time) and on Escape. The bar takes no
+with GTK's arrow pointing at the button (styled as the contents: the same tint and
+outline), closes on an outside click (so one is open at a time) and on Escape. The bar takes no
 keyboard, so that clicks on it leave the focus with the window; while a popover is open
 the bar's layer surface asks for the keyboard `OnDemand`, so that Escape reaches it,
 and gives it back (`None`) when the popover closes. `OnDemand` rather than `Exclusive`:
@@ -300,7 +301,9 @@ one:
   in four levels, `network-wired-symbolic`, `network-wireless-acquiring-symbolic`, or
   offline); hidden without NM. Its popover, as macOS's: a "Wi-Fi" title with a switch,
   a wired connection's row when there is one, the known networks in range (the current
-  one chosen), then "Other Networks", a closed `GtkExpander`, by signal. Rows show the
+  one chosen), then "Other Networks", a closed `GtkExpander`, by signal. The networks
+  scroll under the switch (a `GtkScrolledWindow` at most half the output's height), so a
+  long list never takes the popover off the output. Rows show the
   signal and, after the name, a lock for a secured network. A click on a known network
   activates it (on the current one, nothing); on another, an open one joins and a
   secured one opens the dialog.
@@ -368,10 +371,17 @@ binds `ext_background_effect_manager_v1`, and reads its capabilities with one ro
 trip: without blur among them, there is none. Each bar's window, each popover and the
 OSD asks for blur behind its `wl_surface` when it is mapped (logging `blur on` at info
 for bars, at debug for the others, which map on every showing); the request takes effect
-with GTK's next commit. A bar's region is all of it; a popover's and the OSD's are
-their surface with its corners rounded (10 px, and half the height for the OSD's pill),
-two rows of pixels at a time, so that the blur does not show past the corners, and set
-again whenever the surface's width or height changes. The effect object is destroyed when it is
+with GTK's next commit. A bar's region is all of it; the OSD's and the dialog's are
+their surface with its corners rounded (half the height for the OSD's pill, 14 px for
+the dialog), two rows of pixels at a time, so that the blur does not show past the
+corners. A popover's is its contents (its first child's bounds) so rounded at 10 px,
+and its arrow, row by row: the arrow is GTK 4.22's (`gtk_popover_get_gap_coords`), 12
+px from its tip to the contents and 24 px wide at its base, its tip at the middle of the
+button (the button's bounds in the bar, less the popup's position, from `GdkPopup`), its
+base kept clear of the rounded corners; on the contents' top or bottom, whichever side
+has the gap, so a popover opening upward from a bottom bar, or shifted at an output's
+edge, is covered too. The region is set again on each layout of the surface (its size,
+and a popover's place). The effect object is destroyed when it is
 unmapped. The queue is drained on each request; a later change of capabilities is not followed. GTK 4.23.3 and later bind
 the protocol themselves (a second object is a protocol error), so there the shell logs
 that blur is not supported yet; that path (blur nodes in the snapshot) is to be built
@@ -495,6 +505,9 @@ run on the system bus. The test checks:
     pipewire-pulse the item comes back. The VM has no backlight: no brightness item.
 14. the OSD shows on the focused output (Virtual-2), not on the other; with Virtual-2
     switched off, it shows on Virtual-1 (pixels of each output's bottom middle)
+15. a popover's arrow, over a striped background (swaybg): drawn between the item and the
+    contents (tinted), blurred within (the stripes smoothed near its base), and the
+    strips beside it exactly the background (no tint, no blur)
 
 The network's VM test (`tests/network.nix`, in the same session, `tests/session.nix`)
 has real Wi-Fi: four `mac80211_hwsim` radios, NetworkManager on its iwd backend for
@@ -509,7 +522,8 @@ is typed with the VM's keyboard, into whatever has the focus. It checks:
 
 1. the network item is offline, then follows each network joined
 2. the popover lists the networks in range under "Other Networks", and the known ones
-   above them, the current one checked
+   above them, the current one checked; with 24 networks in range (each radio also has seven open
+   ones), the popover ends above the output's bottom and a wheel over it scrolls it
 3. the open network joins with a click
 4. the WPA2 one opens the dialog (its text checked), which takes the keyboard: a wrong
    password shows "Wrong password or credentials." in it, still open; the right one

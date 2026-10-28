@@ -67,7 +67,12 @@ window.bar menubutton.item > button:checked {
   background-color: rgba(255, 255, 255, 0.2);
 }
 
-/* A popover: frosted as the bar, rounded, with a thin outline. */
+/* A popover: frosted as the bar, rounded, with a thin outline; its arrow alike. */
+popover.item-popover > arrow {
+  background-color: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 popover.item-popover > contents {
   background-color: rgba(0, 0, 0, 0.35);
   color: white;

@@ -93,7 +93,8 @@ impl Blur {
             return;
         };
         let effect: Rc<RefCell<Option<Effect>>> = Rc::default();
-        // A rounded region follows the surface's size; a bar's covers all, whatever it is.
+        // A rounded region follows the surface's layout (its size, and a popover's place,
+        // which moves its arrow); a bar's covers all, whatever it is.
         if radius > 0 {
             native.connect_realize(glib::clone!(
                 #[strong]
@@ -105,13 +106,12 @@ impl Blur {
                         return;
                     };
                     let (blur, effect) = (blur.clone(), effect.clone());
-                    let resized = move |surface: &gdk::Surface| {
+                    let native = native.clone().upcast::<gtk::Widget>();
+                    surface.connect_layout(move |_, _, _| {
                         if let Some(effect) = &*effect.borrow() {
-                            blur.region(effect, surface, radius);
+                            blur.region(effect, &native, radius);
                         }
-                    };
-                    surface.connect_width_notify(resized.clone());
-                    surface.connect_height_notify(resized);
+                    });
                 }
             ));
         }
@@ -152,27 +152,92 @@ impl Blur {
         let effect = self
             .manager
             .get_background_effect(&wayland.wl_surface()?, &self.qh, ());
-        self.region(&effect, &surface, radius);
+        self.region(&effect, native.upcast_ref(), radius);
         Some(effect)
     }
 
-    /// Set `effect`'s region to `surface` at its size now, with its corners rounded.
-    fn region(&self, effect: &Effect, surface: &gdk::Surface, radius: i32) {
+    /// Set `effect`'s region to `native` as it is now: all of it, with its corners rounded,
+    /// or for a popover its contents so, and its arrow.
+    fn region(&self, effect: &Effect, native: &gtk::Widget, radius: i32) {
+        let Some(surface) = native
+            .downcast_ref::<gtk::Native>()
+            .and_then(|n| n.surface())
+        else {
+            return;
+        };
         let region = self.compositor.create_region(&self.qh, ());
         if radius == 0 {
             region.add(0, 0, i32::MAX, i32::MAX);
         }
-        let (width, height) = (surface.width(), surface.height());
+        let popover = native.downcast_ref::<gtk::Popover>();
+        let contents = popover.and_then(|p| p.first_child()?.compute_bounds(p));
+        let (x, y, width, height) = match contents {
+            Some(b) => (
+                b.x() as i32,
+                b.y() as i32,
+                b.width() as i32,
+                b.height() as i32,
+            ),
+            None => (0, 0, surface.width(), surface.height()),
+        };
         let radius = radius.min(width / 2).min(height / 2).max(0);
-        region.add(0, radius, width, height - 2 * radius);
+        region.add(x, y + radius, width, height - 2 * radius);
         // The corners, two rows at a time.
-        for (y, rows, inset) in corner_bands(radius) {
-            region.add(inset, y, width - 2 * inset, rows);
-            region.add(inset, height - y - rows, width - 2 * inset, rows);
+        for (top, rows, inset) in corner_bands(radius) {
+            region.add(x + inset, y + top, width - 2 * inset, rows);
+            region.add(x + inset, y + height - top - rows, width - 2 * inset, rows);
+        }
+        if let Some(popover) = popover {
+            for (left, top, wide) in arrow_rows(popover, (y, y + height), radius) {
+                region.add(left, top, wide, 1);
+            }
         }
         effect.set_blur_region(Some(&region));
         region.destroy();
     }
+}
+
+/// A popover's arrow, as GTK 4.22 draws it (`gtk_popover_get_gap_coords`): from its tip,
+/// at the middle of the button it points to, to a base 24 px wide (kept clear of the
+/// corners rounded at `radius`) on its contents' edge, `rows` (top, bottom) of the
+/// contents. One row at a time: (left, row, width).
+fn arrow_rows(
+    popover: &gtk::Popover,
+    (top, bottom): (i32, i32),
+    radius: i32,
+) -> Vec<(i32, i32, i32)> {
+    let (Some(button), Some(popup)) = (
+        popover.parent(),
+        popover.surface().and_downcast::<gdk::Popup>(),
+    ) else {
+        return Vec::new();
+    };
+    let Some(native) = button.native() else {
+        return Vec::new();
+    };
+    let Some(bounds) = button.compute_bounds(&native) else {
+        return Vec::new();
+    };
+    let (nx, _) = native.surface_transform();
+    let width = popover.width();
+    let tip = (f64::from(bounds.x()) + nx).floor() as i32 + bounds.width().ceil() as i32 / 2
+        - popup.position_x();
+    // Like GTK's CLAMP, it never panics (the popover may not have its size yet).
+    let clamp = |x: i32, low: i32, high: i32| x.max(low).min(high);
+    let left = clamp(tip - 12, radius, width - 24 - radius);
+    let right = clamp(tip + 12, radius + 24, width - radius);
+    let tip = clamp(tip, 0, width);
+    // Above the contents (a popover under its button), or below them.
+    let (rows, tip_row, step) = match top > 0 {
+        true => (top, 0, 1),
+        false => (popover.height() - bottom, popover.height() - 1, -1),
+    };
+    (0..rows)
+        .map(|i| {
+            let along = |end: i32| tip + (end - tip) * (i + 1) / rows;
+            (along(left), tip_row + step * i, along(right) - along(left))
+        })
+        .collect()
 }
 
 /// A corner rounded at `radius` as bands of two rows, top down: (first row, rows, how far

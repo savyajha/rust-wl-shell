@@ -47,17 +47,29 @@ impl NetworkItem {
             .child(&others)
             .build();
         other.add_css_class("section");
+        // The networks scroll, under the switch, as macOS's do.
+        let networks = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        networks.append(&known);
+        networks.append(&other);
+        let scrolled = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .child(&networks)
+            .build();
         for widget in [
             wired.upcast_ref(),
             wifi.row.upcast_ref(),
-            known.upcast_ref(),
-            other.upcast_ref::<gtk::Widget>(),
+            scrolled.upcast_ref::<gtk::Widget>(),
         ] {
             item.content.append(widget);
         }
         let sent = requests.clone();
-        item.popover.connect_show(move |_| {
+        item.popover.connect_show(move |popover| {
             let _ = sent.send(Request::Scan);
+            // At most half its output's height.
+            let surface = popover.root().and_then(|root| root.surface());
+            let monitor = surface.and_then(|s| s.display().monitor_at_surface(&s));
+            scrolled.set_max_content_height(monitor.map_or(400, |m| m.geometry().height() / 2));
         });
         Self {
             item,

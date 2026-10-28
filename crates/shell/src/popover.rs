@@ -1,7 +1,7 @@
 //! The component every right-side item is built on: a flat button in the bar (hidden until
-//! its item has something to show), opening GTK's own popover under it. GTK places it,
-//! closes it on an outside click (one open at a time) and on Escape; it is frosted as the
-//! bar is.
+//! its item has something to show), opening GTK's own popover under it, its arrow pointing
+//! at the button. GTK places it, closes it on an outside click (one open at a time) and on
+//! Escape; it is frosted as the bar is, arrow and all.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -24,7 +24,6 @@ impl Item {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let popover = gtk::Popover::builder()
             .child(&content)
-            .has_arrow(false)
             .css_classes(["item-popover"])
             .build();
         let button = gtk::MenuButton::builder()
