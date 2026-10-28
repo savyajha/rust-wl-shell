@@ -1,5 +1,5 @@
 //! One output's bar: its workspaces and the focused app on the left; the keyboard layout,
-//! the power profile, the brightness, the volume, the battery and the clock on the right.
+//! the brightness, the volume, the battery (with the power mode) and the clock on the right.
 
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ use shell_core::{Update, audio};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::blur::Blur;
-use crate::items::{BatteryItem, LayoutItem, ProfileItem};
+use crate::items::{BatteryItem, LayoutItem};
 use crate::sliders::{BrightnessItem, VolumeItem};
 
 pub struct Bar {
@@ -26,7 +26,6 @@ pub struct Bar {
     clock: String,
     /// Each one `None` when the config switches it off.
     layout: Option<LayoutItem>,
-    profile: Option<ProfileItem>,
     brightness: Option<BrightnessItem>,
     volume: Option<VolumeItem>,
     battery: Option<BatteryItem>,
@@ -120,22 +119,21 @@ impl Component for Bar {
             clock: String::new(),
             layout: (config.keyboard_layout)
                 .then(|| LayoutItem::new(init.niri.clone(), &init.blur)),
-            profile: (config.power_profile)
-                .then(|| ProfileItem::new(init.profiles.clone(), &init.blur)),
             brightness: (config.brightness)
                 .then(|| BrightnessItem::new(init.brightness.clone(), &init.blur)),
             volume: (config.volume).then(|| VolumeItem::new(init.audio.clone(), &init.blur)),
-            battery: (config.battery)
-                .then(|| BatteryItem::new(config.battery_percentage, &init.blur)),
+            battery: (config.battery).then(|| {
+                let profiles = config.power_profile.then(|| init.profiles.clone());
+                BatteryItem::new(config.battery_percentage, profiles, &init.blur)
+            }),
         };
         let widgets = view_output!();
         let layout = model.layout.as_ref().map(|item| &item.item.button);
-        let profile = model.profile.as_ref().map(|item| &item.item.button);
         let brightness = model.brightness.as_ref().map(|item| &item.item.button);
         let volume = model.volume.as_ref().map(|item| &item.item.button);
         let battery = model.battery.as_ref().map(|item| &item.item.button);
         // Before the clock, in this order.
-        let buttons = [layout, profile, brightness, volume, battery];
+        let buttons = [layout, brightness, volume, battery];
         for button in buttons.into_iter().flatten() {
             button.insert_before(&widgets.right, Some(&widgets.clock));
         }
@@ -173,8 +171,8 @@ impl Component for Bar {
                 }
             }
             Msg::Update(Update::Profiles(profiles)) => {
-                if let Some(item) = &self.profile {
-                    item.show(profiles.as_ref());
+                if let Some(item) = &self.battery {
+                    item.show_profiles(profiles.as_ref());
                 }
             }
             Msg::App(app) => self.app = app,

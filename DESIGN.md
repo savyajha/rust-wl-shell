@@ -1,8 +1,9 @@
 # Design
 
 rust-wl-shell is a macOS-style bar for niri: a bar on every output with the output's
-workspaces and the focused app's name on the left; the keyboard layout, the power
-profile, the brightness, the volume, the battery and the clock on the right, each item
+workspaces and the focused app's name on the left; the keyboard layout, the brightness,
+the volume, the battery (with the power mode in its popover) and the clock on the right,
+each item
 with its own popover; and an on-screen display (OSD) for volume and brightness.
 
 ## Crates
@@ -78,13 +79,20 @@ loudest channel, in percent of libpulse's normal volume, as pactl and wpctl show
 and mute, and the outputs to choose from: one per available port (its availability not
 "no") of each hardware sink, as macOS and GNOME list them, so a headphone jack gets its
 own output when something is plugged in (cards are followed too, for their jacks); a
-sink without ports is one output. An output is named by its port's description
-("Speakers"), with its card's added when two outputs would share a name (the sink's
-`device.description`: the card's under pipewire-pulse, the sink's own under
-PulseAudio), and " 2", " 3" in order when they still would; its kind (speaker,
-headphones, display, Bluetooth, other), for its icon, comes from the port's type
-(libpulse 14's, through libpulse-binding's `pa_v14` feature), else from words in its
-name; other kinds (line out) show as speakers, as GNOME shows them. Only hardware sinks are listed: pipewire-pulse flags a sink `HARDWARE` unless its
+sink without ports is one output. A port whose type (libpulse 14's, through
+libpulse-binding's `pa_v14` feature) is specific (speaker, headphones, headset, HDMI,
+Bluetooth) is named by its description ("Speakers") and gets that kind's icon. A
+generic port (analog, line, S/PDIF, unknown), like a USB DAC's "Analog Output", is
+named by its card ("Chu2 DSP"), and its icon comes from the card: its form factor
+(headphone or headset, speaker) when it has one, else headphones for a USB or Bluetooth
+card, else speakers. A Bluetooth sink (bus `bluetooth`) is named by its card, the
+device ("AirPods Pro"), whatever its port's type, since bluez5 describes its routes
+generically ("Headphones"); the port's type still gives the icon. The card's properties are read from the sink's, where
+pipewire-pulse copies them: `device.description` (under plain PulseAudio, the sink's
+own), `device.bus`, and `device.form_factor` (PulseAudio's key, else PipeWire's
+`device.form-factor`); the owner's DAC has a bus and no form factor. Names two outputs
+share get their card's added (unless it is their name already), and " 2", " 3" in
+order when they still would. Only hardware sinks are listed: pipewire-pulse flags a sink `HARDWARE` unless its
 node is virtual, which leaves out EasyEffects' sink and other filters. Requests set the
 default sink's volume (its channels scaled so that the loudest is at the level, at most
 100 %, which keeps their balance), its mute, or an output: its port first, unless its
@@ -168,15 +176,17 @@ as "DE"), then its label, with no GTK radio or check indicator. For screen reade
 button, checked when chosen. They are rebuilt on each change; a click on another row
 sends its choice and closes the popover, and the rows show the choice only once the
 service's update says it was made, so a refused one (polkit, for one) changes nothing. Each item has an accessible name that says its state
-("Battery 50%, on battery", "Power profile: Balanced").
+("Battery 50%, on battery").
 
-`items.rs` has three items, `sliders.rs` two more:
+`items.rs` has two items, `sliders.rs` two more:
 
 - the battery: the theme's `battery-level-N[-charging]-symbolic` by tens (charged when
   full on mains), the percentage beside it only with `battery-percentage`; the popover
-  has the percentage, the state and the time to empty or full.
-- the power profile: `power-profile-<profile>-symbolic`; the popover lists the offered
-  profiles, and why performance is limited when it is.
+  has the percentage, the state and the time to empty or full, then, as macOS has Low
+  Power Mode in its battery menu, the "Power Mode" section (with `power-profile`): the
+  offered profiles as rows with their icons, and why performance is limited when it is;
+  hidden without power-profiles-daemon. With no battery there is no battery item, and so
+  no power mode.
 - the keyboard layout: its short name in upper case, as macOS shows it ("EN", "DE"),
   shown only with two layouts or more; the popover lists them, and a choice is niri's
   `SwitchLayout`.
@@ -321,10 +331,10 @@ run on the system bus. The test checks:
 7. an output switched off loses its bar and gets it back, with its workspaces, when
    switched on
 8. a niri socket that closes after the event-stream reply ends the shell with status 1
-9. a click on the power profile item opens its popover with three profiles; a choice
-   the daemon refuses leaves the rows on its profile (checked through AT-SPI's
-   `checked` state); a click on Power Saver sets it on the daemon, closes the popover,
-   and the item follows
+9. the power mode, in the battery's popover (no item of its own): three profiles; a
+   choice the daemon refuses leaves the rows on its profile (checked through AT-SPI's
+   `checked` state); a click on Power Saver sets it on the daemon and closes the
+   popover, which shows it chosen when opened again; with no battery, no power mode
 10. the layout item shows "EN"; choosing German in its popover switches niri's layout
     and the item shows "DE"
 11. no battery without UPower; with it, the battery item, its popover with the time
@@ -336,8 +346,8 @@ run on the system bus. The test checks:
     virtual null sink as EasyEffects' is): no OSD at start-up; `wpctl set-volume` moves
     the item and shows the OSD, which hides after 1.5 s; the popover lists the hardware
     sinks' available ports, not the virtual sink, with only the playing row checked (the
-    emulated cards have one port each, "Line Out", on cards both named "Built-in Audio",
-    so the rows are "Line Out (Built-in Audio)" and "Line Out (Built-in Audio) 2"); the
+    emulated cards have one generic port each, "Line Out", on cards both named "Built-in
+    Audio", so the rows are "Built-in Audio" and "Built-in Audio 2"); the
     speaker before the slider mutes and unmutes (pactl); a drag on its slider sets the
     volume (pactl)
     and shows no OSD; choosing the other output makes it the default and, the popover

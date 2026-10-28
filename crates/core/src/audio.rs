@@ -65,7 +65,6 @@ pub enum Kind {
     Headphones,
     Display,
     Bluetooth,
-    Other,
 }
 
 impl Audio {
@@ -256,24 +255,29 @@ fn read(context: &Weak<RefCell<Context>>, state: &Shared) {
                 if sink == default {
                     playing = Some((percent(info.volume.max()), info.mute, info.volume));
                 }
-                // Under pipewire-pulse the card's description; under PulseAudio the sink's.
-                let card = info
-                    .proplist
-                    .get_str("device.description")
-                    .unwrap_or_default();
-                let active_port = info.active_port.as_ref().map(|port| text(&port.name));
+                // pipewire-pulse copies its card's properties to a sink: the card's
+                // description (under PulseAudio the sink's own), its bus, and its form
+                // factor (PulseAudio's key, else PipeWire's), when the card has one.
+                let property = |key: &str| info.proplist.get_str(key);
+                let card = property("device.description").unwrap_or_default();
+                let bus = property("device.bus");
                 let ports = info.ports.iter().map(|p| Port {
                     name: text(&p.name),
                     description: text(&p.description),
-                    kind: kind(p.r#type, &text(&p.name)),
+                    kind: specific(p.r#type),
                     available: p.available != PortAvailable::No,
                 });
                 let sink = Sink {
                     name: sink,
-                    description: text(&info.description),
+                    card: card.clone(),
                     hardware: info.flags.contains(SinkFlagSet::HARDWARE),
+                    bluetooth: bus.as_deref() == Some("bluetooth"),
+                    kind: generic(
+                        property("device.form_factor").or(property("device.form-factor")),
+                        bus,
+                    ),
                     ports: ports.collect(),
-                    active_port,
+                    active_port: info.active_port.as_ref().map(|port| text(&port.name)),
                 };
                 for output in sink_outputs(sink, &default) {
                     outputs.push(output);
@@ -345,8 +349,13 @@ fn percent(volume: Volume) -> u32 {
 /// A sink, as libpulse lists it, as much as its outputs need.
 struct Sink {
     name: String,
-    description: String,
+    /// Its card's description.
+    card: String,
     hardware: bool,
+    /// Bluetooth ports have generic descriptions ("Headphones"); the card is the device.
+    bluetooth: bool,
+    /// What its card is, for a generic port's icon.
+    kind: Kind,
     ports: Vec<Port>,
     active_port: Option<String>,
 }
@@ -354,26 +363,30 @@ struct Sink {
 struct Port {
     name: String,
     description: String,
-    kind: Kind,
+    /// What its type says it is, when it says.
+    kind: Option<Kind>,
     available: bool,
 }
 
 /// A hardware sink's outputs: one per available port, or one for the sink without ports;
-/// `active` when it is the `default` sink, on that port.
+/// `active` when it is the `default` sink, on that port. A port of a specific type is named
+/// by its description ("Headphones"); a generic one (analog, line, unknown) by its card
+/// ("Chu2 DSP"), with the card's kind. A Bluetooth sink's ports are named by its card
+/// ("AirPods Pro"), with their own kind.
 fn sink_outputs(sink: Sink, default: &str) -> Vec<Output> {
     if !sink.hardware {
         return Vec::new();
     }
     let available = sink.ports.into_iter().filter(|port| port.available);
     let mut ports: Vec<_> = available
-        .map(|port| (Some(port.name), port.description, port.kind))
+        .map(|port| match port.kind {
+            Some(kind) if sink.bluetooth => (Some(port.name), sink.card.clone(), kind),
+            Some(kind) => (Some(port.name), port.description, kind),
+            None => (Some(port.name), sink.card.clone(), sink.kind),
+        })
         .collect();
     if ports.is_empty() {
-        ports.push((
-            None,
-            sink.description,
-            kind(DevicePortType::Unknown, &sink.name),
-        ));
+        ports.push((None, sink.card.clone(), sink.kind));
     }
     let output = |(port, name, kind): (Option<String>, String, Kind)| {
         let port_active = port.is_none() || port == sink.active_port;
@@ -391,12 +404,13 @@ fn sink_outputs(sink: Sink, default: &str) -> Vec<Output> {
     ports.into_iter().map(output).collect()
 }
 
-/// Names that outputs share get their card's description (`cards`, in step with them);
-/// those still shared, " 2", " 3" in order.
+/// Names that outputs share get their card's description (`cards`, in step with them), if
+/// it is not their name already; those still shared, " 2", " 3" in order.
 fn dedupe(outputs: &mut [Output], cards: &[String]) {
     let names: Vec<String> = outputs.iter().map(|output| output.name.clone()).collect();
     for (i, output) in outputs.iter_mut().enumerate() {
-        if names.iter().filter(|name| **name == names[i]).count() > 1 {
+        let shared = names.iter().filter(|name| **name == names[i]).count() > 1;
+        if shared && names[i] != cards[i] {
             output.name = format!("{} ({})", names[i], cards[i]);
         }
     }
@@ -409,28 +423,26 @@ fn dedupe(outputs: &mut [Output], cards: &[String]) {
     }
 }
 
-/// A port's kind, by its type (libpulse ≥ 14), else by words in its name.
-fn kind(kind: DevicePortType, name: &str) -> Kind {
+/// A port's kind when its type is specific; none for a generic one (analog, line, S/PDIF,
+/// unknown).
+fn specific(kind: DevicePortType) -> Option<Kind> {
     match kind {
-        DevicePortType::Speaker | DevicePortType::Earpiece => Kind::Speaker,
-        DevicePortType::Headphones | DevicePortType::Headset | DevicePortType::Handset => {
-            Kind::Headphones
-        }
-        DevicePortType::HDMI | DevicePortType::TV | DevicePortType::Video => Kind::Display,
-        DevicePortType::Bluetooth | DevicePortType::Handsfree | DevicePortType::Portable => {
-            Kind::Bluetooth
-        }
-        _ => {
-            let name = name.to_lowercase();
-            let has = |words: &[&str]| words.iter().any(|word| name.contains(word));
-            match () {
-                _ if has(&["hdmi", "displayport", "-dp"]) => Kind::Display,
-                _ if has(&["headphone", "headset"]) => Kind::Headphones,
-                _ if has(&["bluez", "bluetooth"]) => Kind::Bluetooth,
-                _ if has(&["speaker"]) => Kind::Speaker,
-                _ => Kind::Other,
-            }
-        }
+        DevicePortType::Speaker | DevicePortType::Earpiece => Some(Kind::Speaker),
+        DevicePortType::Headphones | DevicePortType::Headset => Some(Kind::Headphones),
+        DevicePortType::HDMI => Some(Kind::Display),
+        DevicePortType::Bluetooth => Some(Kind::Bluetooth),
+        _ => None,
+    }
+}
+
+/// A card's kind, for its generic ports: by its form factor, else headphones for a USB or
+/// Bluetooth one (a DAC, a headset), else speakers.
+fn generic(form_factor: Option<String>, bus: Option<String>) -> Kind {
+    match (form_factor.as_deref(), bus.as_deref()) {
+        (Some("headphone" | "headset"), _) => Kind::Headphones,
+        (Some("speaker"), _) => Kind::Speaker,
+        (_, Some("usb" | "bluetooth")) => Kind::Headphones,
+        _ => Kind::Speaker,
     }
 }
 
@@ -449,67 +461,165 @@ mod tests {
         }
     }
 
-    fn sink(name: &str, hardware: bool, ports: &[(&str, bool)], active: Option<&str>) -> Sink {
-        let port = |&(port, available): &(&str, bool)| Port {
-            name: port.into(),
-            description: port.to_uppercase(),
-            kind: Kind::Speaker,
+    /// A port: name, description, the kind its type gives, available.
+    type P<'a> = (&'a str, &'a str, Option<Kind>, bool);
+
+    fn sink(name: &str, card: &str, kind: Kind, ports: &[P], active: Option<&str>) -> Sink {
+        let port = |&(name, description, kind, available): &P| Port {
+            name: name.into(),
+            description: description.into(),
+            kind,
             available,
         };
         Sink {
             name: name.into(),
-            description: format!("{name} sink"),
-            hardware,
+            card: card.into(),
+            hardware: true,
+            bluetooth: false,
+            kind,
             ports: ports.iter().map(port).collect(),
             active_port: active.map(String::from),
         }
     }
 
-    /// Each output's sink, name and whether it is active.
-    fn shown(outputs: &[Output]) -> Vec<(&str, &str, bool)> {
-        let shown = outputs
+    /// Each output's name, kind and whether it is active.
+    fn shown(outputs: &[Output]) -> Vec<(&str, Kind, bool)> {
+        outputs
             .iter()
-            .map(|o| (o.sink.as_str(), o.name.as_str(), o.active));
-        shown.collect()
+            .map(|o| (o.name.as_str(), o.kind, o.active))
+            .collect()
     }
 
     #[test]
     fn the_default_sinks_volume_and_the_hardware_outputs() {
-        let ports = [("speaker", true), ("headphones", true), ("line", false)];
-        let analog = sink("analog", true, &ports, Some("headphones"));
-        let outputs = sink_outputs(analog, "analog");
-        // The unavailable port is left out; the active port of the default sink is active.
-        let want = [("analog", "SPEAKER", false), ("analog", "HEADPHONES", true)];
+        // The laptop's: its specific ports by name; the S/PDIF port is not available.
+        let ports = [
+            (
+                "analog-output-speaker",
+                "Speakers",
+                Some(Kind::Speaker),
+                true,
+            ),
+            (
+                "analog-output-headphones",
+                "Headphones",
+                Some(Kind::Headphones),
+                true,
+            ),
+            (
+                "iec958-stereo-output",
+                "Digital Output (S/PDIF)",
+                None,
+                false,
+            ),
+        ];
+        let card = "Ryzen HD Audio Controller";
+        let laptop = sink(
+            "analog",
+            card,
+            Kind::Speaker,
+            &ports,
+            Some("analog-output-headphones"),
+        );
+        let outputs = sink_outputs(laptop, "analog");
+        let want = [
+            ("Speakers", Kind::Speaker, false),
+            ("Headphones", Kind::Headphones, true),
+        ];
         assert_eq!(shown(&outputs), want);
         assert!(outputs[1].port_active && !outputs[0].port_active);
-        // A sink without ports is one output, on whatever it plays.
-        let hdmi = sink_outputs(sink("hdmi", true, &[], None), "analog");
-        assert_eq!(shown(&hdmi), [("hdmi", "hdmi sink", false)]);
-        assert!(hdmi[0].port_active && hdmi[0].port.is_none());
-        // Without an available port too; and a virtual sink (EasyEffects') is none.
-        let unplugged = sink("usb", true, &[("headphones", false)], None);
+        // The owner's USB DAC: a generic port, named by its card, a USB card's icon.
+        let ports = [
+            ("analog-output", "Analog Output", None, true),
+            (
+                "iec958-stereo-output",
+                "Digital Output (S/PDIF)",
+                None,
+                false,
+            ),
+        ];
+        let kind = generic(None, Some("usb".into()));
+        let dac = sink("usb", "Chu2 DSP", kind, &ports, Some("analog-output"));
         assert_eq!(
-            shown(&sink_outputs(unplugged, "usb")),
-            [("usb", "usb sink", true)]
+            shown(&sink_outputs(dac, "analog")),
+            [("Chu2 DSP", Kind::Headphones, false)]
         );
-        assert!(sink_outputs(sink("easyeffects_sink", false, &[], None), "x").is_empty());
+        // HDMI: a specific port; a sink without ports is one output, named by its card.
+        let ports = [(
+            "hdmi-output-0",
+            "HDMI / DisplayPort",
+            Some(Kind::Display),
+            true,
+        )];
+        let hdmi = sink(
+            "hdmi",
+            "Renoir HDMI",
+            Kind::Speaker,
+            &ports,
+            Some("hdmi-output-0"),
+        );
+        assert_eq!(
+            shown(&sink_outputs(hdmi, "hdmi")),
+            [("HDMI / DisplayPort", Kind::Display, true)]
+        );
+        // A Bluetooth headset: its route's generic description gives way to the device.
+        let ports = [(
+            "headphone-output",
+            "Headphones",
+            Some(Kind::Headphones),
+            true,
+        )];
+        let mut airpods = sink("bluez", "AirPods Pro", Kind::Headphones, &ports, None);
+        airpods.bluetooth = true;
+        assert_eq!(
+            shown(&sink_outputs(airpods, "x")),
+            [("AirPods Pro", Kind::Headphones, false)]
+        );
+        let portless = sink_outputs(sink("p", "Card", Kind::Speaker, &[], None), "p");
+        assert_eq!(shown(&portless), [("Card", Kind::Speaker, true)]);
+        assert!(portless[0].port_active && portless[0].port.is_none());
+        // A virtual sink (EasyEffects') is none.
+        let mut virtual_sink = sink("easyeffects_sink", "Easy Effects", Kind::Speaker, &[], None);
+        virtual_sink.hardware = false;
+        assert!(sink_outputs(virtual_sink, "x").is_empty());
     }
 
     #[test]
     fn no_default_is_no_audio() {
         // No default sink: none is active (and the callback, finding no sink by that name
         // to take the volume from, sends no audio at all).
-        let analog = sink("analog", true, &[("speaker", true)], Some("speaker"));
+        let ports = [("speaker", "Speakers", Some(Kind::Speaker), true)];
+        let laptop = sink("analog", "Card", Kind::Speaker, &ports, Some("speaker"));
         assert_eq!(
-            shown(&sink_outputs(analog, "")),
-            [("analog", "SPEAKER", false)]
+            shown(&sink_outputs(laptop, "")),
+            [("Speakers", Kind::Speaker, false)]
         );
     }
 
     #[test]
+    fn generic_ports_take_their_cards_kind() {
+        let kind = |form: Option<&str>, bus: Option<&str>| {
+            generic(form.map(String::from), bus.map(String::from))
+        };
+        assert_eq!(kind(Some("headset"), Some("pci")), Kind::Headphones);
+        assert_eq!(kind(Some("speaker"), Some("usb")), Kind::Speaker);
+        assert_eq!(kind(None, Some("bluetooth")), Kind::Headphones);
+        assert_eq!(kind(None, Some("pci")), Kind::Speaker);
+        assert_eq!(kind(None, None), Kind::Speaker);
+        assert_eq!(specific(DevicePortType::Headphones), Some(Kind::Headphones));
+        assert_eq!(specific(DevicePortType::Line), None);
+    }
+
+    #[test]
     fn shared_names_get_their_cards_then_numbers() {
-        let mut outputs = ["Speakers", "Speakers", "HDMI", "Line Out", "Line Out"].map(output);
-        let cards = ["Ryzen", "USB", "Ryzen", "Built-in", "Built-in"].map(String::from);
+        let mut outputs = [
+            "Speakers", "Speakers", "HDMI", "Line Out", "Line Out", "Built-in", "Built-in",
+        ]
+        .map(output);
+        let cards = [
+            "Ryzen", "USB", "Ryzen", "Built-in", "Built-in", "Built-in", "Built-in",
+        ]
+        .map(String::from);
         dedupe(&mut outputs, &cards);
         let names: Vec<&str> = outputs.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(
@@ -520,24 +630,11 @@ mod tests {
                 "HDMI",
                 "Line Out (Built-in)",
                 "Line Out (Built-in) 2",
+                // Named by their card already: numbered.
+                "Built-in",
+                "Built-in 2",
             ]
         );
-    }
-
-    #[test]
-    fn kinds_by_type_else_by_name() {
-        assert_eq!(kind(DevicePortType::Headphones, "x"), Kind::Headphones);
-        assert_eq!(kind(DevicePortType::HDMI, "x"), Kind::Display);
-        assert_eq!(kind(DevicePortType::Bluetooth, "x"), Kind::Bluetooth);
-        assert_eq!(
-            kind(DevicePortType::Unknown, "hdmi-output-0"),
-            Kind::Display
-        );
-        assert_eq!(
-            kind(DevicePortType::Unknown, "analog-output-speaker"),
-            Kind::Speaker
-        );
-        assert_eq!(kind(DevicePortType::Unknown, "analog-output"), Kind::Other);
     }
 
     #[test]

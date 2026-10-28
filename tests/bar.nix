@@ -19,10 +19,12 @@
 #   6. the AT-SPI tree has the bar, its workspace buttons and its labels
 #   7. an output switched off loses its bar, and gets one again when switched on
 #   8. niri's IPC closing ends the shell with a failure (a fake niri socket)
-#   9. the power profile (a fake power-profiles-daemon): a click on the item opens its
-#      popover with the three profiles; a refused choice leaves the rows on the daemon's
-#      profile; a click on Power Saver sets it on the daemon, closes the popover, and the
-#      item follows
+#   9. the power mode (a fake power-profiles-daemon), in the battery's popover, with no
+#      item of its own: the popover shows the three profiles; a refused choice leaves the
+#      rows on the daemon's profile; a click on Power Saver sets it on the daemon and
+#      closes the popover, which shows it chosen when opened again; the rows go while
+#      the daemon is stopped, and come back when it starts again; with no battery,
+#      there is no power mode at all
 #  10. the keyboard layout: niri has two, the item shows "EN"; choosing German in its
 #      popover switches niri to it, and the item shows "DE" (xkeyboard-config's short
 #      name); after each popover closes, the bar asks for no keyboard again
@@ -508,6 +510,8 @@ pkgs.testers.runNixOSTest {
         t = tree()
         outputs = [n for r, n in t if r == "radio button"]
         print(f"the outputs: {outputs}")
+        # Their ports ("Line Out") are generic: named by their cards, both "Built-in Audio".
+        assert outputs == ["Built-in Audio", "Built-in Audio 2"], outputs
         assert len(outputs) >= 2 and not [o for o in outputs if "Virtual" in o], outputs
         # The emulated cards' ports share their names, card and all: told apart by place.
         radios = json.loads(as_user("atspi-tree --radios"))
@@ -563,40 +567,12 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(f"test $({LOG} | grep -c 'audio: connected') -ge 2", timeout=30)
         wait_for_tree(has("button", "Volume muted"), "the volume item back")
 
-    with subtest("choosing a power profile sets it"):
-        item = "Power profile: Performance"
-        wait_for_tree(has("button", item), "the power profile")
-        wait_for_tree(lambda t: not [n for _, n in t if n.startswith("Battery")], "no battery")
-        # Right of it: the clock, the volume, and the battery while there is one (not here).
-        click_item(2)
-        wait_for_tree(has("radio button", "Power Saver"), "the profiles' popover")
-        machine.send_monitor_command(f"screendump {machine.out_dir}/profiles.ppm gpu 0")
-        # The title, then Performance, Balanced and Power Saver.
-        lines = popover_lines()
-        assert len(lines) == 4, lines
-        # Refused first (as polkit may): the popover, reopened, still shows the profile.
-        machine.succeed("touch /run/fake-power-profiles-refuse")
-        click(*lines[3])
-        wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
-        retry(lambda _: keyboard_free(), 10)
-        click_item(2)
-        wait_for_tree(has("radio button", "Power Saver"), "the profiles' popover again")
-        checked = json.loads(as_user("atspi-tree --checked"))
-        assert "Performance" in checked and "Power Saver" not in checked, checked
-        machine.succeed("rm /run/fake-power-profiles-refuse")
-        click(*lines[3])
-        busctl = "busctl get-property org.freedesktop.UPower.PowerProfiles "
-        busctl += "/org/freedesktop/UPower/PowerProfiles "
-        busctl += "org.freedesktop.UPower.PowerProfiles ActiveProfile"
-        machine.wait_until_succeeds(f"{busctl} | grep -q power-saver", timeout=10)
-        wait_for_tree(has("button", "Power profile: Power Saver"), "the item following")
-        wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
-        retry(lambda _: keyboard_free(), 10)
-
     with subtest("the keyboard layout switches"):
         wait_for_tree(has("button", "Keyboard layout: English (US)"), "the layout item")
         wait_for_tree(has("label", "EN"), "the layout's short name")
-        click_item(3)
+        # Right of it: the clock and the volume (no battery yet, and no power mode item).
+        assert not [n for _, n in tree() if n.startswith("Power profile")], "a power item"
+        click_item(2)
         wait_for_tree(has("radio button", "German"), "the layouts' popover")
         machine.send_monitor_command(f"screendump {machine.out_dir}/layouts.ppm gpu 0")
         # English (US), then German.
@@ -636,8 +612,49 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl kill -s USR1 fake-upower")
         wait_for_tree(has("button", "Battery 90%, charging"), "the battery charging")
         assert icon() != before, "the battery's icon did not change"
+
+    with subtest("choosing a power mode in the battery's popover sets it"):
+        # Back on the empty workspace: no window's text under the popover.
+        niri("action focus-workspace 2")
+        click_item(1)
+        wait_for_tree(has("radio button", "Power Saver"), "the power modes")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/power.ppm gpu 0")
+        # 90 %, Charging, the time to full, Power Mode, Performance, Balanced, Power Saver.
+        lines = popover_lines()
+        assert len(lines) == 7, lines
+        # Refused first (as polkit may): the popover, reopened, still shows the profile.
+        machine.succeed("touch /run/fake-power-profiles-refuse")
+        click(*lines[-1])
+        wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
+        retry(lambda _: keyboard_free(), 10)
+        click_item(1)
+        wait_for_tree(has("radio button", "Power Saver"), "the power modes again")
+        checked = json.loads(as_user("atspi-tree --checked"))
+        assert "Performance" in checked and "Power Saver" not in checked, checked
+        machine.succeed("rm /run/fake-power-profiles-refuse")
+        click(*lines[-1])
+        busctl = "busctl get-property org.freedesktop.UPower.PowerProfiles "
+        busctl += "/org/freedesktop/UPower/PowerProfiles "
+        busctl += "org.freedesktop.UPower.PowerProfiles ActiveProfile"
+        machine.wait_until_succeeds(f"{busctl} | grep -q power-saver", timeout=10)
+        wait_for_tree(lacks("radio button", "Power Saver"), "the popover closed")
+        retry(lambda _: keyboard_free(), 10)
+        click_item(1)
+        wait_for_tree(has("radio button", "Power Saver"), "the power modes, chosen")
+        checked = json.loads(as_user("atspi-tree --checked"))
+        assert "Power Saver" in checked and "Performance" not in checked, checked
+        # The daemon going and coming back, with the popover open: the rows follow it.
+        machine.succeed("systemctl stop fake-power-profiles")
+        wait_for_tree(lacks("radio button", "Power Saver"), "the power modes gone")
+        assert has("label", "Charging")(tree()), "the popover closed"
+        machine.succeed("systemctl start fake-power-profiles")
+        wait_for_tree(has("radio button", "Power Saver"), "the power modes back")
+        machine.send_key("esc")
+        retry(lambda _: keyboard_free(), 10)
+        # No battery: no battery item, and no power mode at all.
         machine.succeed("systemctl kill -s USR2 fake-upower")
         wait_for_tree(lacks("button", "Battery 90%, charging"), "no battery present")
+        assert not [n for _, n in tree() if n in ("Power Saver", "Performance")], tree()
 
     with subtest("an output switched off loses its bar, and gets it back"):
         wait_for_tree(lambda t: bars(t) == 2, "two bars")

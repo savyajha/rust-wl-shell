@@ -4,8 +4,9 @@ A macOS-style top bar for the [niri](https://github.com/YaLTeR/niri) Wayland com
 in GTK4 and [relm4](https://relm4.org).
 
 > **Early work in progress.** It shows a bar on every output: the output's workspaces as
-> dots and the focused app's name on the left; the keyboard layout, the power profile,
-> the battery and the clock on the right, each item opening its own popover, all over
+> dots and the focused app's name on the left; the keyboard layout, the brightness, the
+> volume, the battery (with the power mode) and the clock on the right, each item opening
+> its own popover, all over
 > the compositor's blur. More items, notifications and the tray are to come.
 
 > **Please read before using**
@@ -62,7 +63,7 @@ backlight "amdgpu_bl1"
 | `app-name` | `true` | Show the focused window's app name. |
 | `battery` | `true` | Show the battery (UPower's), when there is one. |
 | `battery-percentage` | `false` | Show the battery's percentage next to its icon. |
-| `power-profile` | `true` | Show the power profile (power-profiles-daemon's), when the daemon runs. |
+| `power-profile` | `true` | Show the power mode (power-profiles-daemon's) in the battery's popover, when the daemon runs. |
 | `keyboard-layout` | `true` | Show the keyboard layout (niri's), when there are two or more. |
 | `volume` | `true` | Show the volume (the default output's, through PipeWire's pulse server or PulseAudio). |
 | `brightness` | `true` | Show the backlight's brightness, when there is a backlight. |
@@ -73,11 +74,11 @@ The four sizes follow the height unless set, in macOS's proportions at 24 px; ea
 at most the height. The clock is redrawn on each minute and after a resume from sleep.
 
 The items on the right, right to left after the clock: the battery, the volume, the
-brightness, the power profile, the keyboard layout. Each is a symbolic icon from the icon theme (the layout is its short
-name, as GNOME has it, in upper case: "EN", "DE") and opens a popover under it: the battery's percentage, state and time
-left; the volume's slider (its speaker mutes) and the outputs (each sound card's available
+brightness, the keyboard layout. Each is a symbolic icon from the icon theme (the layout is its short
+name, as GNOME has it, in upper case: "EN", "DE") and opens a popover under it: the
+battery's percentage, state and time left, and the power modes to choose from; the volume's slider (its speaker mutes) and the outputs (each sound card's available
 ports) to choose from; the brightness's
-slider; the power profiles to choose from; the layouts to choose from. A click outside or
+slider; the layouts to choose from. A click outside or
 Escape closes it. The brightness is set through logind, which needs no permission.
 
 The OSD, a pill near the bottom of the focused output, shows the volume or brightness

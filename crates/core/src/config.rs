@@ -37,6 +37,7 @@ pub struct Config {
     /// The battery's percentage next to its icon (macOS leaves it off).
     #[knuffel(child, unwrap(argument), default = false)]
     pub battery_percentage: bool,
+    /// The power modes in the battery's popover.
     #[knuffel(child, unwrap(argument), default = true)]
     pub power_profile: bool,
     /// Shown only with two layouts or more.

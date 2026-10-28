@@ -141,11 +141,10 @@ impl BrightnessItem {
 
 pub const BRIGHTNESS: &str = "display-brightness-symbolic";
 
-/// The theme's icon for an output's kind; others (line out, say) are speakers, as GNOME
-/// shows them.
+/// The theme's icon for an output's kind.
 pub fn output_icon(kind: Kind) -> &'static str {
     match kind {
-        Kind::Speaker | Kind::Other => "audio-speakers-symbolic",
+        Kind::Speaker => "audio-speakers-symbolic",
         Kind::Headphones => "audio-headphones-symbolic",
         Kind::Display => "video-display-symbolic",
         Kind::Bluetooth => "bluetooth-symbolic",

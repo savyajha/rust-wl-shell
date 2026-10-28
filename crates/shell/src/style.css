@@ -175,3 +175,11 @@ window.osd levelbar {
 window.osd label {
   min-width: 2em;
 }
+
+popover.item-popover .line {
+  margin: 0 6px;
+}
+
+popover.item-popover .section {
+  margin-top: 8px;
+}
