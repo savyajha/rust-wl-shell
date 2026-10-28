@@ -183,3 +183,60 @@ popover.item-popover .line {
 popover.item-popover .section {
   margin-top: 8px;
 }
+
+/* A popover's title with a switch, and what follows a row's label (a lock, a level). */
+popover.item-popover .switch-row {
+  margin: 0 6px 4px;
+}
+
+popover.item-popover .switch-row .title {
+  margin: 0;
+}
+
+popover.item-popover .after {
+  opacity: 0.7;
+}
+
+popover.item-popover expander {
+  margin: 0 6px;
+}
+
+/* The password dialog, as libadwaita's alert dialog: a frosted panel, a bold heading over
+   the centred text, rounded fields, and equal pill buttons, Join filled with the accent. */
+window.dialog {
+  background-color: rgba(0, 0, 0, 0.5);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 24px;
+  min-width: 300px;
+}
+
+window.dialog .heading {
+  font-weight: 700;
+  font-size: 1.2em;
+}
+
+window.dialog .error {
+  color: #ff938a;
+}
+
+window.dialog entry,
+window.dialog dropdown > button,
+window.dialog button.pill {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  min-height: 32px;
+}
+
+window.dialog button.pill {
+  border-radius: 9999px;
+}
+
+window.dialog button.suggested {
+  background: @accent_bg_color;
+  color: @accent_fg_color;
+}

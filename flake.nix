@@ -54,6 +54,12 @@
             homeManager = home-manager.nixosModules.home-manager;
             module = self.homeManagerModules.default;
           };
+          # The network, VPN and Bluetooth items, on virtual Wi-Fi radios and a fake BlueZ.
+          network = import ./tests/network.nix {
+            inherit pkgs;
+            homeManager = home-manager.nixosModules.home-manager;
+            module = self.homeManagerModules.default;
+          };
           fmt = cargoCheck "fmt" [ pkgs.rustfmt ] "cargo fmt --all --check";
           clippy = cargoCheck "clippy" [
             pkgs.rustc

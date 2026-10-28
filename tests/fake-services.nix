@@ -1,5 +1,6 @@
-# Fake system services for the VM test, in dbus-python (as the greeter's tests have them):
-# UPower's DisplayDevice and power-profiles-daemon, with as much of each as the shell reads.
+# Fake system services for the VM tests, in dbus-python (as the greeter's tests have them):
+# UPower's DisplayDevice, power-profiles-daemon and BlueZ, with as much of each as the shell
+# reads.
 { pkgs }:
 
 let
@@ -119,6 +120,71 @@ in
     GLib.MainLoop().run()
   '';
 
+  # BlueZ: an adapter, powered, with two paired devices (headphones with a battery at 80 %,
+  # and a mouse), neither connected, and one not paired; Set (Powered), Connect and
+  # Disconnect change them, as BlueZ does.
+  bluez = python "fake-bluez" ''
+    ${common}
+    MANAGER = "org.freedesktop.DBus.ObjectManager"
+    DEVICE = "org.bluez.Device1"
+
+
+    class Root(dbus.service.Object):
+        @dbus.service.method(MANAGER, out_signature="a{oa{sa{sv}}}")
+        def GetManagedObjects(self):
+            return {
+                o.path: {o.interface: o.properties, **o.extra}
+                for o in [adapter] + devices
+            }
+
+
+    class Bluez(Object):
+        def __init__(self, path, interface, properties, extra=None):
+            super().__init__(bus, path, interface, properties)
+            self.path = path
+            self.extra = extra or {}
+
+        @dbus.service.method(PROPERTIES, in_signature="ssv")
+        def Set(self, interface, name, value):
+            self.change({name: value})
+
+        @dbus.service.method(DEVICE)
+        def Connect(self):
+            self.change({"Connected": dbus.Boolean(True)})
+
+        @dbus.service.method(DEVICE)
+        def Disconnect(self):
+            self.change({"Connected": dbus.Boolean(False)})
+
+
+    def device(address, name, icon, paired, extra=None):
+        return Bluez(
+            "/org/bluez/hci0/dev_00_00_00_00_00_" + address,
+            DEVICE,
+            {
+                "Alias": dbus.String(name),
+                "Icon": dbus.String(icon),
+                "Paired": dbus.Boolean(paired),
+                "Connected": dbus.Boolean(False),
+            },
+            extra,
+        )
+
+
+    name = dbus.service.BusName("org.bluez", bus)
+    root = Root(bus, "/")
+    adapter = Bluez(
+        "/org/bluez/hci0", "org.bluez.Adapter1", {"Powered": dbus.Boolean(True)}
+    )
+    battery = {"org.bluez.Battery1": {"Percentage": dbus.Byte(80)}}
+    devices = [
+        device("01", "WH-1000XM4", "audio-headphones", True, battery),
+        device("02", "Mouse", "input-mouse", True),
+        device("03", "Phone", "phone", False),
+    ]
+    GLib.MainLoop().run()
+  '';
+
   policy = pkgs.writeTextDir "share/dbus-1/system.d/fake-services.conf" ''
     <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
       "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -126,10 +192,12 @@ in
       <policy user="root">
         <allow own="org.freedesktop.UPower"/>
         <allow own="org.freedesktop.UPower.PowerProfiles"/>
+        <allow own="org.bluez"/>
       </policy>
       <policy context="default">
         <allow send_destination="org.freedesktop.UPower"/>
         <allow send_destination="org.freedesktop.UPower.PowerProfiles"/>
+        <allow send_destination="org.bluez"/>
       </policy>
     </busconfig>
   '';

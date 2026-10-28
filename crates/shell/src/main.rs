@@ -4,8 +4,11 @@
 //! config. The core (`shell_core`) runs on its own thread; this is the GTK side.
 
 mod bar;
+mod bluetooth;
 mod blur;
+mod dialog;
 mod items;
+mod network;
 mod osd;
 mod popover;
 mod shell;
@@ -95,7 +98,7 @@ fn run(marks: Marks, path: Option<PathBuf>) -> anyhow::Result<()> {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
-    let core = shell_core::start(config.clock_format.clone(), config.backlight.clone());
+    let core = shell_core::start(&config);
     let main_loop = glib::MainLoop::new(None, false);
     shell::start(&display, config, core, marks, main_loop.clone());
     main_loop.run();

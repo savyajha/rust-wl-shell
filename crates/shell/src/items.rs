@@ -128,16 +128,16 @@ impl BatteryItem {
             .map(|profile| Row {
                 label: profile_name(profile),
                 circle: Circle::Icon(profile_icon(profile)),
+                chosen: *profile == profiles.active,
+                after: None,
             })
             .collect();
-        let chosen = profiles.offered.iter().position(|p| *p == profiles.active);
         let (requests, offered) = (mode.requests.clone(), profiles.offered.clone());
         let choose = move |i: usize| {
             // Fails only once the core has stopped, and the shell with it.
             let _ = requests.send(offered[i].clone());
         };
-        let chosen = chosen.unwrap_or(usize::MAX);
-        self.item.rows(&mode.rows, &rows, chosen, choose);
+        self.item.rows(&mode.rows, &rows, false, choose);
         let why = profiles
             .degraded
             .as_deref()
@@ -192,12 +192,15 @@ impl LayoutItem {
         };
         let rows: Vec<Row> = layouts
             .iter()
-            .map(|layout| Row {
+            .enumerate()
+            .map(|(i, layout)| Row {
                 label: layout.clone(),
                 circle: Circle::Text(xkb::short_name(layout).to_uppercase()),
+                chosen: i == current as usize,
+                after: None,
             })
             .collect();
-        self.item.rows(&self.rows, &rows, current as usize, choose);
+        self.item.rows(&self.rows, &rows, false, choose);
     }
 }
 

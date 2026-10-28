@@ -8,13 +8,14 @@ use gio_unix::DesktopAppInfo;
 use gtk4::{gdk, gio, glib, prelude::*};
 use relm4::{Component, ComponentController, Controller};
 use shell_core::config::Config;
-use shell_core::{Core, Update, audio, niri};
+use shell_core::{Core, Update, audio, bluetooth, network, niri};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
 use crate::Marks;
 use crate::bar::{self, Bar, Msg};
 use crate::blur::Blur;
+use crate::dialog::Dialog;
 use crate::osd::Osd;
 use crate::sliders::{self, BRIGHTNESS};
 
@@ -24,6 +25,9 @@ struct Shell {
     profiles: UnboundedSender<String>,
     audio: audio::Requests,
     brightness: UnboundedSender<u8>,
+    network: UnboundedSender<network::Request>,
+    bluetooth: UnboundedSender<bluetooth::Request>,
+    dialog: Rc<Dialog>,
     osd: Option<Osd>,
     blur: Option<Rc<Blur>>,
     bars: Vec<(gdk::Monitor, Controller<Bar>)>,
@@ -48,6 +52,9 @@ pub fn start(
         profiles,
         audio,
         brightness,
+        network,
+        answers,
+        bluetooth,
     } = core;
     let blur = Blur::new(display).map(Rc::new);
     let shell = Rc::new(RefCell::new(Shell {
@@ -55,6 +62,9 @@ pub fn start(
         profiles,
         audio,
         brightness,
+        dialog: Dialog::new(network.clone(), answers, &blur),
+        network,
+        bluetooth,
         osd: config.osd.then(|| Osd::new(&blur)),
         config: Rc::new(config),
         blur,
@@ -109,6 +119,9 @@ impl Shell {
                 profiles: self.profiles.clone(),
                 audio: self.audio.clone(),
                 brightness: self.brightness.clone(),
+                network: self.network.clone(),
+                bluetooth: self.bluetooth.clone(),
+                dialog: self.dialog.clone(),
                 blur: self.blur.clone(),
             })
             .detach();
@@ -122,7 +135,15 @@ impl Shell {
     }
 
     fn update(&mut self, update: Update) {
+        // The dialog's alone, not kept for bars to come.
+        match update {
+            Update::Joined(joined) => return self.dialog.joined(&joined),
+            Update::Prompt(prompt) => return self.dialog.ask(prompt),
+            Update::PromptClosed(id) => return self.dialog.closed(id),
+            _ => {}
+        }
         if let Update::Niri(snapshot) = &update {
+            self.dialog.focus(snapshot.focused_output.clone());
             let app = snapshot.app_id.as_deref().map(app_name).unwrap_or_default();
             if app != self.app {
                 self.app = app;

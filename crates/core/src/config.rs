@@ -50,6 +50,18 @@ pub struct Config {
     /// The level shown on screen when volume or brightness change from outside the shell.
     #[knuffel(child, unwrap(argument), default = true)]
     pub osd: bool,
+    /// The network (Wi-Fi or wired), from NetworkManager.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub network: bool,
+    /// Shown only when NetworkManager has VPN connections.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub vpn: bool,
+    /// The shell answers NetworkManager's own requests for secrets (off: another agent
+    /// does).
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub secret_agent: bool,
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub bluetooth: bool,
     /// The backlight device (in /sys/class/backlight), else the first.
     #[knuffel(child, unwrap(argument))]
     pub backlight: Option<String>,
@@ -202,6 +214,10 @@ mod tests {
             volume false
             brightness false
             osd false
+            network false
+            vpn false
+            secret-agent false
+            bluetooth false
             backlight "amdgpu_bl1"
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
@@ -224,6 +240,10 @@ mod tests {
                 volume: false,
                 brightness: false,
                 osd: false,
+                network: false,
+                vpn: false,
+                secret_agent: false,
+                bluetooth: false,
                 backlight: Some("amdgpu_bl1".into()),
             }
         );

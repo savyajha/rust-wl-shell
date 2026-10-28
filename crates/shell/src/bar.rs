@@ -1,5 +1,6 @@
 //! One output's bar: its workspaces and the focused app on the left; the keyboard layout,
-//! the brightness, the volume, the battery (with the power mode) and the clock on the right.
+//! the brightness, the volume, VPN, Bluetooth, the network, the battery (with the power
+//! mode) and the clock on the right.
 
 use std::rc::Rc;
 
@@ -8,11 +9,14 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::{Component, ComponentParts, ComponentSender};
 use shell_core::config::{Config, Position};
 use shell_core::niri::{self, Workspace};
-use shell_core::{Update, audio};
+use shell_core::{Update, audio, bluetooth, network};
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::bluetooth::BluetoothItem;
 use crate::blur::Blur;
+use crate::dialog::Dialog;
 use crate::items::{BatteryItem, LayoutItem};
+use crate::network::{NetworkItem, VpnItem};
 use crate::sliders::{BrightnessItem, VolumeItem};
 
 pub struct Bar {
@@ -28,6 +32,9 @@ pub struct Bar {
     layout: Option<LayoutItem>,
     brightness: Option<BrightnessItem>,
     volume: Option<VolumeItem>,
+    vpn: Option<VpnItem>,
+    bluetooth: Option<BluetoothItem>,
+    network: Option<NetworkItem>,
     battery: Option<BatteryItem>,
 }
 
@@ -40,6 +47,10 @@ pub struct Init {
     pub audio: audio::Requests,
     /// The backlight's level to set.
     pub brightness: UnboundedSender<u8>,
+    pub network: UnboundedSender<network::Request>,
+    pub bluetooth: UnboundedSender<bluetooth::Request>,
+    /// The shell's one password dialog.
+    pub dialog: Rc<Dialog>,
     pub blur: Option<Rc<Blur>>,
 }
 
@@ -122,6 +133,11 @@ impl Component for Bar {
             brightness: (config.brightness)
                 .then(|| BrightnessItem::new(init.brightness.clone(), &init.blur)),
             volume: (config.volume).then(|| VolumeItem::new(init.audio.clone(), &init.blur)),
+            vpn: (config.vpn).then(|| VpnItem::new(init.network.clone(), &init.blur)),
+            bluetooth: (config.bluetooth)
+                .then(|| BluetoothItem::new(init.bluetooth.clone(), &init.blur)),
+            network: (config.network)
+                .then(|| NetworkItem::new(init.network.clone(), init.dialog.clone(), &init.blur)),
             battery: (config.battery).then(|| {
                 let profiles = config.power_profile.then(|| init.profiles.clone());
                 BatteryItem::new(config.battery_percentage, profiles, &init.blur)
@@ -131,9 +147,12 @@ impl Component for Bar {
         let layout = model.layout.as_ref().map(|item| &item.item.button);
         let brightness = model.brightness.as_ref().map(|item| &item.item.button);
         let volume = model.volume.as_ref().map(|item| &item.item.button);
+        let vpn = model.vpn.as_ref().map(|item| &item.item.button);
+        let bluetooth = model.bluetooth.as_ref().map(|item| &item.item.button);
+        let network = model.network.as_ref().map(|item| &item.item.button);
         let battery = model.battery.as_ref().map(|item| &item.item.button);
         // Before the clock, in this order.
-        let buttons = [layout, brightness, volume, battery];
+        let buttons = [layout, brightness, volume, vpn, bluetooth, network, battery];
         for button in buttons.into_iter().flatten() {
             button.insert_before(&widgets.right, Some(&widgets.clock));
         }
@@ -175,6 +194,21 @@ impl Component for Bar {
                     item.show_profiles(profiles.as_ref());
                 }
             }
+            Msg::Update(Update::Network(network)) => {
+                if let Some(item) = &self.network {
+                    item.show(network.as_ref());
+                }
+                if let Some(item) = &self.vpn {
+                    item.show(network.as_ref());
+                }
+            }
+            Msg::Update(Update::Bluetooth(bluetooth)) => {
+                if let Some(item) = &self.bluetooth {
+                    item.show(bluetooth.as_ref());
+                }
+            }
+            // The dialog's, which the shell passes to it.
+            Msg::Update(Update::Joined(_) | Update::Prompt(_) | Update::PromptClosed(_)) => {}
             Msg::App(app) => self.app = app,
             Msg::Connector => {}
         }

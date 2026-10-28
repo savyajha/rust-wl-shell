@@ -92,9 +92,10 @@ impl VolumeItem {
             .map(|output| Row {
                 label: output.name.clone(),
                 circle: Circle::Icon(output_icon(output.kind)),
+                chosen: output.active,
+                after: None,
             })
             .collect();
-        let chosen = audio.outputs.iter().position(|output| output.active);
         let (requests, outputs) = (self.requests.clone(), audio.outputs.clone());
         // Its port too, unless its sink already has it.
         let choose = move |i: usize| {
@@ -103,8 +104,7 @@ impl VolumeItem {
             let sink = output.sink.clone();
             requests.send(Request::Default { sink, port });
         };
-        let chosen = chosen.unwrap_or(usize::MAX);
-        self.item.rows(rows, &entries, chosen, choose);
+        self.item.rows(rows, &entries, false, choose);
     }
 }
 

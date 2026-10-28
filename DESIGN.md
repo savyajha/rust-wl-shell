@@ -2,22 +2,25 @@
 
 rust-wl-shell is a macOS-style bar for niri: a bar on every output with the output's
 workspaces and the focused app's name on the left; the keyboard layout, the brightness,
-the volume, the battery (with the power mode in its popover) and the clock on the right,
-each item
-with its own popover; and an on-screen display (OSD) for volume and brightness.
+the volume, VPN, Bluetooth, the network, the battery (with the power mode in its
+popover) and the clock on the right, each item with its own popover; an on-screen
+display (OSD) for volume and brightness; and a password dialog for Wi-Fi and
+NetworkManager's requests.
 
 ## Crates
 
 - `crates/core` (`shell_core`): plain Rust, no GTK. The services (niri, the clock,
-  UPower, power-profiles-daemon, the backlight, the audio), the state they produce, and
-  the config. It runs a current-thread tokio runtime on its own thread
+  UPower, power-profiles-daemon, the backlight, the audio, NetworkManager and its secret
+  agent, BlueZ), the state they produce, and the config. The network, the agent and
+  Bluetooth run only when an item needs them (`network` or `vpn`, `bluetooth`). It runs a current-thread tokio runtime on its own thread
   (`shell_core::start`); the audio has a thread of its own (below).
 - `crates/shell` (binary `rust-wl-shell`): the GTK4 + relm4 UI, on GTK's main loop.
 
 The two talk over tokio channels with data only. The core sends `Update`s, each a whole
 snapshot of one service (`Niri`, `Clock`, `Battery`, `Profiles`, `Audio`,
-`Backlight`); the UI sends requests back on one sender per service (`Core::niri`,
-`profiles`, `audio`, `brightness`). The UI awaits the update channel from a GLib future;
+`Backlight`, `Network`, `Bluetooth`), or an event for the dialog (`Joined`, `Prompt`,
+`PromptClosed`); the UI sends requests back on one sender per service (`Core::niri`,
+`profiles`, `audio`, `brightness`, `network`, `answers`, `bluetooth`). The UI awaits the update channel from a GLib future;
 tokio's channels need no runtime on the receiving side.
 
 ## niri
@@ -118,6 +121,99 @@ shell's updates still close when the core stops. Without a server (or when it go
 away) the thread sends `None` and connects again every 2 s, logging each error once
 while it repeats.
 
+## The network
+
+`network.rs` reads NetworkManager through nmrs 3.5 (zbus 5 and tokio, as the core). What
+was checked before building on it:
+
+- **Its bus connection.** nmrs opens its own system bus connection
+  (`NetworkManager::new`), and its secret agent another; neither takes an existing one.
+  So the core has three: its own, nmrs's and the agent's.
+- **Its events.** `network_events` follows, by D-Bus signals and without polling:
+  devices added and removed and their states, NM's state, access points added and
+  removed and each one's `Strength`, the active connections list, `WirelessEnabled`
+  (and its hardware switch), connectivity, the saved connections, and NM restarting.
+  Not followed: an active connection's own state, so a plugin VPN (one without a device)
+  that goes from activating to activated is seen only at the next other event. A
+  WireGuard connection has a device, whose state is followed. On the laptop, iwd's
+  signal updates make an event about every 6 s; a read takes about 12 ms there.
+- **iwd.** Measured in the VM test's set-up (NM 1.58 on iwd 3.12, hwsim radios):
+  `RequestScan` and joining an open, a WPA2 and an enterprise network all work, and a
+  wrong WPA2 password fails as `AuthFailed` after about 8 s. Two things need care. NM's
+  iwd backend refuses `system-ca-certs` ("not supported"), so the system's CA store is
+  named as the CA certificate, `/etc/ssl/certs/ca-certificates.crt`; and iwd reads that
+  file only if it holds plain certificates: NixOS's default bundle also has OpenSSL's
+  `TRUSTED CERTIFICATE` blocks, which iwd's ell rejects (the whole file fails to load),
+  so it needs `security.pki.useCompatibleBundle = true`. And NM refuses to add and
+  activate an enterprise network in one call before iwd has a profile for it, so the
+  shell adds it, waits 1 s (iwd loading the profile NM writes; at once fails), then
+  activates it.
+- **The agent.** nmrs's `agent` module serves NM's `SecretAgent` interface and hands
+  each request over as a stream item with a responder, which the core keeps until the
+  UI's answer comes back on a channel; NM's cancellations come on a second stream. Its
+  request and responder types leave the secrets out of `Debug`, and nmrs logs none at
+  the levels the shell shows (info and above). It does not check that a request comes
+  from NetworkManager (below).
+
+On each event (those coming within 100 ms read once), the core reads the Wi-Fi switch,
+the access points, the saved connections and the active ones, and sends `Network` when
+it changed (`None` without NM):
+
+- **the primary connection**, for the icon: an activated wired connection, else an
+  activated Wi-Fi one (its signal), else connecting, else offline.
+- **the Wi-Fi networks**: one per SSID (hidden ones left out), with the strongest
+  access point's signal and its security (open, WPA2, WPA3 when it offers SAE only, or
+  enterprise), the saved connection's UUID when it is known, and whether it is the
+  current one; known ones first (the current one on top), then the others by signal.
+- **the VPNs**: the saved VPN and WireGuard connections, each off, connecting or on.
+
+The requests: a scan (when the popover opens), the Wi-Fi switch, activating a saved
+connection (a known network, or a VPN to switch on; a known network whose password is
+refused is activated a second time, as NM asks the agent for a new one only then, with
+iwd), deactivating one (a VPN), and joining a network. Joining an open or WPA2 network is
+nmrs's `connect`, which deletes a new profile that fails; an enterprise one is added,
+then activated, and deleted if that fails. A join's end is sent back as `Joined`, with
+its error. Each request runs as a task of its own: a join takes seconds.
+
+## The secret agent
+
+`agent.rs` registers the agent (identifier `rust-wl-shell`) once NM is on the bus, and
+again whenever NM restarts. A request the user may be asked (`ALLOW_INTERACTION`) for a
+Wi-Fi password, an enterprise network's credentials or a VPN's password becomes a
+`Prompt`; any other is answered at once with no secrets. The UI's answer goes back to NM
+(the password, the username and password, or the VPN secret under the key NM hinted);
+no answer is a cancel. NM's `CancelGetSecrets` closes the prompt (`PromptClosed`); nmrs
+has answered NM already. So does a prompt left 115 s: nmrs answers NM with no secrets at
+120 s and tells no one, so each pending request has a deadline a little before that. With
+`secret-agent false` there is no agent (another one, a panel's, answers NM), and joins
+from the popover still use the dialog. Secrets are kept only until they are passed on, and never
+logged: neither the requests nor the answers implement `Debug`.
+
+Known limits, left as they are:
+
+- One prompt at a time: a second prompt, or a join from the popover, cancels the one
+  open (NM is answered at once).
+- Cancel while a join from the popover shows "Joining…" closes the dialog, but the
+  attempt goes on to its end.
+- nmrs warns "SecretResponder dropped without responding" when a responder is dropped
+  unanswered, as after its own timeout.
+- An enterprise network whose server's certificate is signed by a private CA (one not
+  in the system's bundle) cannot be joined: there is no field for a CA certificate.
+- nmrs does not check that `GetSecrets` comes from NetworkManager. The system bus's
+  policy lets only root call `SecretAgent` methods, so the risk is low; a check would
+  need nmrs to take the message header (`#[zbus(header)]`) in its interface.
+
+## Bluetooth
+
+`bluetooth.rs` reads BlueZ with zbus directly (not `bluer`, which would bring the
+`dbus` crate beside zbus): its `ObjectManager` objects, again on any signal BlueZ sends
+(those within 100 ms read once) and when it starts or stops. `Bluetooth` is the first
+adapter's `Powered` and its paired devices, by name: `Alias`, `Icon`, `Connected`, and
+`Battery1`'s `Percentage` when BlueZ has it; `None` without BlueZ or an adapter. The
+requests set `Powered`, or call a device's `Connect` or `Disconnect`. There is no
+pairing. A known limit: every signal from BlueZ (any object's, any property's) means a
+new read of all its objects, coalesced over 100 ms.
+
 ## The backlight
 
 `backlight.rs` reads `/sys/class/backlight/<device>` (the config's `backlight`, a name,
@@ -175,10 +271,12 @@ higher priority, overrides; a faint white otherwise; it holds an icon, or a shor
 as "DE"), then its label, with no GTK radio or check indicator. For screen readers each row is a radio
 button, checked when chosen. They are rebuilt on each change; a click on another row
 sends its choice and closes the popover, and the rows show the choice only once the
-service's update says it was made, so a refused one (polkit, for one) changes nothing. Each item has an accessible name that says its state
-("Battery 50%, on battery").
+service's update says it was made, so a refused one (polkit, for one) changes nothing. A
+row may show something after its label (a lock, a battery's level). Each item has an
+accessible name that says its state ("Battery 50%, on battery", "Wi-Fi: Home").
 
-`items.rs` has two items, `sliders.rs` two more:
+`items.rs` has two items, `sliders.rs` two more, `network.rs` two and `bluetooth.rs`
+one:
 
 - the battery: the theme's `battery-level-N[-charging]-symbolic` by tens (charged when
   full on mains), the percentage beside it only with `battery-percentage`; the popover
@@ -198,10 +296,47 @@ service's update says it was made, so a refused one (polkit, for one) changes no
   a choice makes that output play. With no outputs the section is hidden.
 - the brightness: `display-brightness-symbolic`, hidden with no backlight; the popover
   has a slider.
+- the network: the primary connection's icon (`network-wireless-signal-*-symbolic`
+  in four levels, `network-wired-symbolic`, `network-wireless-acquiring-symbolic`, or
+  offline); hidden without NM. Its popover, as macOS's: a "Wi-Fi" title with a switch,
+  a wired connection's row when there is one, the known networks in range (the current
+  one chosen), then "Other Networks", a closed `GtkExpander`, by signal. Rows show the
+  signal and, after the name, a lock for a secured network. A click on a known network
+  activates it (on the current one, nothing); on another, an open one joins and a
+  secured one opens the dialog.
+- VPN: `network-vpn-symbolic`, dimmed while none is on, hidden with no VPN connection;
+  a row per connection, a click switching it on or off ("Connecting…" after it while
+  it connects).
+- Bluetooth: `bluetooth-{active,disconnected,disabled}-symbolic`; a "Bluetooth" title
+  with a switch, then "Devices": the paired ones with their kind's icon (BlueZ's icon
+  names mapped to the theme's symbolic ones), chosen when connected, their battery after
+  the name; "No devices" when there are none. A click connects or disconnects.
+
+Rows that switch something on and off (VPNs, devices) are toggles: any number chosen,
+a click on a chosen one counts too, and each is a check box for screen readers. A title
+with a switch (`popover::Switch`) sends the user's flip, and shows the service's state
+only when it comes.
 
 A slider (`popover::Slider`) sends a request for each whole percent the user moves it
 to; an update moves it without sending (it remembers the value it shows, and a level
 above 100 % stops it at 100 without that counting as a move).
+
+### The password dialog
+
+`dialog.rs`: one for the shell, styled as libadwaita's alert dialog in plain GTK (no
+libadwaita): a frosted panel (blurred, rounded at 14 px) on the overlay layer, centred
+on the focused output (niri's), namespace `rust-wl-shell-dialog`. A bold heading ("Wi-Fi
+Password Required"), the centred text ('The Wi-Fi network "X" requires a WPA2
+password.'), a `GtkPasswordEntry` with its peek icon, for an enterprise network a
+username and an "Options" disclosure (method PEAP or TTLS, inner method MSCHAPv2 or
+PAP, the domain the server's certificate must be in), the error line, and Cancel and
+Join as equal pill buttons, Join filled with the accent. Enter joins from any entry;
+Escape cancels. While open, its surface asks for the keyboard `OnDemand` (niri gives it
+the keyboard when it maps, so typing goes straight in), and on every way it closes it
+asks for none and is unmapped. A join from the popover keeps it open ("Joining…") until
+`Joined`: an error shows in it and Join comes back; success closes it. A prompt from the
+agent closes as soon as it is answered, or when NM cancels it. The password entry is
+emptied on closing.
 
 ### The OSD
 
@@ -308,6 +443,10 @@ Unit tests (`cargo test`):
 - the arguments.
 - UPower's and power-profiles-daemon's properties to their snapshots; the keyboard
   layouts from niri's events; the items' icon names, short layout names and times.
+- the network from what NM lists: one row per SSID with its strongest signal, known
+  networks first and the current one on top, the primary connection (wired over Wi-Fi,
+  connecting, a VPN connecting not counting), the VPNs' states; Bluetooth from BlueZ's
+  objects: the first adapter, its paired devices only, by name, with the battery.
 
 The NixOS VM test (`tests/bar.nix`, `nix build .#checks.x86_64-linux.bar`) runs niri
 itself, on its tty backend on a virtio-gpu without virgl, so Mesa renders with
@@ -357,7 +496,44 @@ run on the system bus. The test checks:
 14. the OSD shows on the focused output (Virtual-2), not on the other; with Virtual-2
     switched off, it shows on Virtual-1 (pixels of each output's bottom middle)
 
-Items and popover rows are found by their pixels (white on the tint, apart by gaps),
+The network's VM test (`tests/network.nix`, in the same session, `tests/session.nix`)
+has real Wi-Fi: four `mac80211_hwsim` radios, NetworkManager on its iwd backend for
+the first (iwd limited to it, eth0 and eth1 unmanaged, alice in the `networkmanager`
+group), and hostapd on the other three in a network namespace of their own, with
+dnsmasq's DHCP, so that their traffic goes over the air: "Home" (WPA2-PSK), "Cafe"
+(open) and "Campus" (WPA2-Enterprise with hostapd's own EAP server, PEAP/MSCHAPv2, its
+certificate for `server.radius.test` signed by a CA added to the system's, with the
+compatible bundle). BlueZ is a fake (`tests/fake-services.nix`). Items, rows, buttons
+and switches are acted on through AT-SPI (their actions, which need no extents); text
+is typed with the VM's keyboard, into whatever has the focus. It checks:
+
+1. the network item is offline, then follows each network joined
+2. the popover lists the networks in range under "Other Networks", and the known ones
+   above them, the current one checked
+3. the open network joins with a click
+4. the WPA2 one opens the dialog (its text checked), which takes the keyboard: a wrong
+   password shows "Wrong password or credentials." in it, still open; the right one
+   joins and closes it
+5. the dialog's Cancel, Escape, and an error then Cancel each close it
+6. the enterprise network asks for the username too; with the domain set in "Options"
+   (reached with Tab, checked through AT-SPI's focus), it joins, and its saved
+   connection has the domain and the CA bundle
+7. Home's password changed: a click on Home, and NM asks the shell's agent, whose dialog
+   joins with the new one; changed again, the dialog's Cancel answers NM at once (the
+   device does not wait in "need auth"); asked again, a join from the popover (an
+   unknown network's dialog) cancels the prompt for NM at once; asked again, NM
+   cancelling its request (the device disconnected) closes the dialog
+8. after each way the dialog closes, and each popover, text typed reaches the focused
+   window (foot) again
+9. the Wi-Fi switch turns the radio off (`nmcli radio wifi`) and on
+10. a WireGuard connection added with nmcli shows the VPN item; its row switches it on
+    and off (`nmcli`), and the item says so
+11. Bluetooth: the paired devices only, in order, the headphones' 80 %; a click connects
+    and disconnects one (the fake's state, the item's name), and the switch turns the
+    adapter off
+12. none of the passwords typed is in the system's or alice's journal
+
+In the bar's test, items and popover rows are found by their pixels (white on the tint, apart by gaps),
 not by AT-SPI's extents, which in this VM are off by about 17 px from where GTK lays
 the buttons out.
 

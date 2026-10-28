@@ -48,15 +48,17 @@ impl Item {
         }
     }
 
-    /// Replace the rows in `rows` (part of the content) with `entries`, the `chosen` one
-    /// shown as such; a click on another calls `choose` with its index and closes. A row is
-    /// a flat button: a round icon (filled with the accent when chosen), then its label. For
-    /// screen readers it is a radio button, checked when chosen.
+    /// Replace the rows in `rows` (part of the content) with `entries`; a click on one
+    /// calls `choose` with its index and closes. A row is a flat button: a round icon
+    /// (filled with the accent when chosen), its label, and what comes after it. In a list
+    /// of choices a click on the chosen row does nothing, and for screen readers each is a
+    /// radio button; in a list of `toggles` (any number on), a click on any row counts, and
+    /// each is a check box.
     pub fn rows(
         &self,
         rows: &gtk::Box,
         entries: &[Row],
-        chosen: usize,
+        toggles: bool,
         choose: impl Fn(usize) + Clone + 'static,
     ) {
         while let Some(child) = rows.first_child() {
@@ -64,36 +66,47 @@ impl Item {
         }
         for (i, entry) in entries.iter().enumerate() {
             let circle = gtk::CenterBox::builder().css_classes(["circle"]).build();
-            let inside: gtk::Widget = match &entry.circle {
-                Circle::Icon(name) => gtk::Image::from_icon_name(name).upcast(),
-                Circle::Text(text) => gtk::Label::new(Some(text)).upcast(),
-            };
+            let inside = entry.circle.widget();
             inside.set_halign(gtk::Align::Center);
             inside.set_valign(gtk::Align::Center);
             circle.set_center_widget(Some(&inside));
             circle.set_valign(gtk::Align::Center);
-            if i == chosen {
+            if entry.chosen {
                 circle.add_css_class("chosen");
             }
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             content.append(&circle);
-            content.append(&gtk::Label::new(Some(&entry.label)));
+            let label = gtk::Label::builder()
+                .label(&entry.label)
+                .hexpand(true)
+                .xalign(0.0)
+                .build();
+            content.append(&label);
+            if let Some(after) = &entry.after {
+                let after = after.widget();
+                after.add_css_class("after");
+                content.append(&after);
+            }
+            let role = match toggles {
+                true => gtk::AccessibleRole::Checkbox,
+                false => gtk::AccessibleRole::Radio,
+            };
             let row = gtk::Button::builder()
                 .child(&content)
                 .css_classes(["row"])
-                .accessible_role(gtk::AccessibleRole::Radio)
+                .accessible_role(role)
                 .build();
-            let checked = match i == chosen {
+            let checked = match entry.chosen {
                 true => gtk::AccessibleTristate::True,
                 false => gtk::AccessibleTristate::False,
             };
             row.update_property(&[gtk::accessible::Property::Label(&entry.label)]);
             row.update_state(&[gtk::accessible::State::Checked(checked)]);
-            let (popover, choose) = (self.popover.clone(), choose.clone());
+            let (popover, choose, chosen) = (self.popover.clone(), choose.clone(), entry.chosen);
             row.connect_clicked(move |_| {
                 // Shown as chosen only once the service says so: a refused choice leaves
                 // the rows as they were.
-                if i != chosen {
+                if toggles || !chosen {
                     choose(i);
                     popover.popdown();
                 }
@@ -107,13 +120,25 @@ impl Item {
 pub struct Row {
     pub label: String,
     pub circle: Circle,
+    pub chosen: bool,
+    /// At the row's end: a lock, a battery's level.
+    pub after: Option<Circle>,
 }
 
-/// What a row's circle holds.
+/// What a row's circle holds, or what is after its label.
 pub enum Circle {
     Icon(&'static str),
     /// A short text, as "DE".
     Text(String),
+}
+
+impl Circle {
+    fn widget(&self) -> gtk::Widget {
+        match self {
+            Circle::Icon(name) => gtk::Image::from_icon_name(name).upcast(),
+            Circle::Text(text) => gtk::Label::new(Some(text)).upcast(),
+        }
+    }
 }
 
 fn keyboard(popover: &gtk::Popover, mode: KeyboardMode) {
@@ -157,5 +182,49 @@ impl Slider {
         // Above 100 (set so elsewhere) the slider stops at 100: not a move to 100.
         self.shown.set(value.min(100));
         self.scale.set_value(f64::from(value));
+    }
+}
+
+/// A popover's title with a switch at its end, as macOS's "Wi-Fi" and "Bluetooth". Flipped
+/// by the user, it calls `flipped`; `show` sets it without.
+pub struct Switch {
+    pub row: gtk::Box,
+    switch: gtk::Switch,
+    shown: Rc<Cell<bool>>,
+}
+
+impl Switch {
+    pub fn new(title: &str, flipped: impl Fn(bool) + 'static) -> Self {
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.add_css_class("switch-row");
+        let label = gtk::Label::builder()
+            .label(title)
+            .hexpand(true)
+            .xalign(0.0)
+            .build();
+        label.add_css_class("title");
+        let switch = gtk::Switch::builder().valign(gtk::Align::Center).build();
+        switch.update_property(&[gtk::accessible::Property::Label(title)]);
+        row.append(&label);
+        row.append(&switch);
+        let shown = Rc::new(Cell::new(false));
+        switch.connect_state_set(glib::clone!(
+            #[strong]
+            shown,
+            move |_, on| {
+                if on != shown.get() {
+                    flipped(on);
+                }
+                // The switch moves, but stays on its state until the service says so.
+                glib::Propagation::Stop
+            }
+        ));
+        Self { row, switch, shown }
+    }
+
+    pub fn show(&self, on: bool) {
+        self.shown.set(on);
+        self.switch.set_active(on);
+        self.switch.set_state(on);
     }
 }

@@ -49,10 +49,13 @@ in
         height = 28;
         clock-format = "%A, %-d %b %H:%M";
         position = "bottom";
+        secret-agent = false;
       };
       description = ''
         The config's keys and their values, as README.md lists them. Unknown keys and
-        invalid values fail the build.
+        invalid values fail the build. `secret-agent = false` leaves NetworkManager's own
+        requests for secrets to another agent (a panel that has one), while the network
+        items stay.
       '';
     };
   };

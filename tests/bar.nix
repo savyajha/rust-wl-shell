@@ -1,11 +1,6 @@
 # NixOS VM test: the bar on niri, on a virtio-gpu (no virgl: Mesa renders in software),
-# through the home-manager module, checked by its pixels and its AT-SPI tree.
-#
-# alice is logged in on tty1 by getty's autologin; her login shell starts niri-session,
-# which runs niri on its tty backend as her user unit and starts graphical-session.target,
-# which starts the shell's unit. niri's background is plain grey, so the bar's tint shows
-# in the pixels. Two outputs: Virtual-1 (1024x768), whose screen is read, and Virtual-2 (800x600) to
-# its right, switched off and on.
+# through the home-manager module, checked by its pixels and its AT-SPI tree, in the
+# session of session.nix; Virtual-2 is switched off and on.
 #
 # Behaviours asserted:
 #   1. the module's settings (not the defaults) pass `--check` and reach the shell; it
@@ -47,41 +42,8 @@
 }:
 
 let
-  inherit (pkgs) lib;
-  user = "alice";
-  uid = 1000;
-  runtimeDir = "/run/user/${toString uid}";
-
-  # niri refuses software EGL renderers on its tty backend (they can crash importing other
-  # GPUs' dmabufs, which this VM has none of), and llvmpipe is all the VM has; llvmpipe has
-  # no render node either, so its GPU is filed under the primary render node instead.
-  niri = pkgs.niri.overrideAttrs (old: {
-    postPatch = (old.postPatch or "") + ''
-      substituteInPlace src/backend/tty.rs \
-        --replace-fail '!egl_device.is_software()' 'true' \
-        --replace-fail '.unwrap_or(node);' '.unwrap_or(self.primary_render_node);'
-    '';
-    doCheck = false;
-  });
-
-  niriConfig = ''
-    hotkey-overlay { skip-at-startup; }
-    animations { off; }
-    xwayland-satellite { off; }
-    prefer-no-csd
-    layout {
-        background-color "#808080"
-        focus-ring { off; }
-        border { off; }
-    }
-    output "Virtual-1" { scale 1; position x=0 y=0; }
-    output "Virtual-2" { scale 1; position x=1024 y=0; }
-    input {
-        keyboard {
-            xkb { layout "us,de"; }
-        }
-    }
-  '';
+  session = import ./session.nix { inherit pkgs homeManager module; };
+  inherit (session) user runtimeDir;
 
   fakes = import ./fake-services.nix { inherit pkgs; };
 
@@ -92,77 +54,6 @@ let
     Name=Alpha Test
     Exec=foot --app-id org.test.Alpha
   '';
-
-  # The bar's AT-SPI tree, as (role, name) pairs, depth first.
-  atspiTree =
-    pkgs.writers.writePython3Bin "atspi-tree"
-      {
-        libraries = [ pkgs.python3Packages.pygobject3 ];
-        makeWrapperArgs = [
-          "--prefix GI_TYPELIB_PATH : ${
-            lib.makeSearchPath "lib/girepository-1.0" [
-              pkgs.at-spi2-core
-              pkgs.gobject-introspection
-            ]
-          }"
-        ];
-      }
-      ''
-        import json
-        import sys
-        import gi
-        gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi, GLib  # noqa: E402
-
-
-        def walk(node):
-            try:
-                yield [node.get_role_name(), node.get_name()]
-                count = node.get_child_count()
-                children = [node.get_child_at_index(i) for i in range(count)]
-            except GLib.Error:
-                # Gone while walked (an OSD hiding, a popover closing): left out.
-                return
-            for child in children:
-                if child is not None:
-                    yield from walk(child)
-
-
-        desktop = Atspi.get_desktop(0)
-        count = desktop.get_child_count()
-        apps = [desktop.get_child_at_index(i) for i in range(count)]
-        bar = [a for a in apps if a.get_name() == "rust-wl-shell"]
-        if sys.argv[1:] == ["--radios"]:
-            # Whether each radio button (each row) is checked, in order.
-            checked = Atspi.StateType.CHECKED
-
-            def radios(node):
-                if node.get_role_name() == "radio button":
-                    yield node.get_state_set().contains(checked)
-                for i in range(node.get_child_count()):
-                    child = node.get_child_at_index(i)
-                    if child is not None:
-                        yield from radios(child)
-
-            print(json.dumps(list(radios(bar[0]))))
-        elif sys.argv[1:] == ["--checked"]:
-            # The names of the checked nodes: the radio rows chosen.
-            checked = Atspi.StateType.CHECKED
-
-            def nodes(node):
-                yield node
-                for i in range(node.get_child_count()):
-                    child = node.get_child_at_index(i)
-                    if child is not None:
-                        yield from nodes(child)
-
-            print(json.dumps([
-                n.get_name() for n in nodes(bar[0])
-                if n.get_state_set().contains(checked)
-            ]))
-        else:
-            print(json.dumps(list(walk(bar[0])) if bar else []))
-      '';
 
   # niri's socket for a second shell: it answers the event-stream request, then closes.
   fakeNiri = pkgs.writers.writePython3 "fake-niri" { } ''
@@ -177,49 +68,22 @@ let
     connection.sendall(b'{"Ok":"Handled"}\n')
     connection.close()
   '';
-
-  gpu = builtins.toJSON {
-    driver = "virtio-gpu-pci";
-    id = "gpu";
-    max_outputs = 2;
-    outputs = [
-      {
-        name = "left";
-        xres = 1024;
-        yres = 768;
-      }
-      {
-        name = "right";
-        xres = 800;
-        yres = 600;
-      }
-    ];
-  };
 in
 pkgs.testers.runNixOSTest {
   name = "bar";
 
   nodes.machine = {
-    imports = [ homeManager ];
-
-    users.users.${user} = {
-      isNormalUser = true;
-      inherit uid;
-    };
-    services.getty.autologinUser = user;
-    environment.loginShellInit = ''
-      # niri-session re-runs itself in a login shell, which reads this again.
-      if [ "$(tty)" = /dev/tty1 ] && [ -z "$NIRI_STARTED" ]; then
-        export NIRI_STARTED=1
-        exec niri-session
-      fi
-    '';
+    imports = [
+      # Not the defaults, so the bar's height and clock show they reached it.
+      (session.machine {
+        height = 28;
+        spacing = 8;
+        dot-size = 6;
+        clock-format = "%H:%M %d/%m";
+      })
+    ];
     environment.systemPackages = [
-      niri
-      pkgs.foot
       alpha
-      atspiTree
-      pkgs.adwaita-icon-theme
       # pactl, to read the volume and the default output.
       pkgs.pulseaudio
     ];
@@ -245,7 +109,6 @@ pkgs.testers.runNixOSTest {
         ];
       };
     };
-    systemd.packages = [ niri ];
 
     # The fakes: power-profiles-daemon from the start, UPower started by the test.
     services.dbus.packages = [ fakes.policy ];
@@ -262,33 +125,7 @@ pkgs.testers.runNixOSTest {
       BusName = "org.freedesktop.UPower";
       ExecStart = fakes.upower;
     };
-    hardware.graphics.enable = true;
-    fonts.packages = [ pkgs.adwaita-fonts ];
-    services.gnome.at-spi2-core.enable = true;
-    programs.dconf.enable = true;
-
-    # The shell in /etc/profiles/per-user, for the run with a fake niri.
-    home-manager.useUserPackages = true;
-    home-manager.users.${user} = {
-      imports = [ module ];
-      home.stateVersion = "26.05";
-      xdg.configFile."niri/config.kdl".text = niriConfig;
-      programs.rust-wl-shell = {
-        enable = true;
-        # Not the defaults, so the bar's height and clock show they reached it.
-        settings = {
-          height = 28;
-          spacing = 8;
-          dot-size = 6;
-          clock-format = "%H:%M %d/%m";
-        };
-      };
-    };
-
-    virtualisation.memorySize = 2048;
     virtualisation.qemu.options = [
-      "-vga none"
-      "-device ${lib.escapeShellArg gpu}"
       "-audiodev none,id=sound1"
       "-audiodev none,id=sound2"
       "-device ich9-intel-hda,id=hda1"
@@ -299,124 +136,7 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
-    import json
-    import re
-    ${builtins.readFile ./screen.py}
-
-    # The tablet's range: both outputs, side by side.
-    SCREEN = (1024 + 800, 768)
-    HEIGHT = 28
-    CLOCK = "%H:%M %d/%m"
-    GREY = 0x80
-    PREFIX = "sudo -u ${user} XDG_RUNTIME_DIR=${runtimeDir} DBUS_SESSION_BUS_ADDRESS=unix:path=${runtimeDir}/bus "
-    LOG = "journalctl --no-pager -o cat _SYSTEMD_USER_UNIT=rust-wl-shell.service"
-
-    def as_user(command):
-        return machine.succeed(PREFIX + command)
-
-    def niri(command):
-        return as_user(f"sh -c 'NIRI_SOCKET=$(ls ${runtimeDir}/niri*.sock) niri msg {command}'")
-
-    def tree():
-        return json.loads(as_user("atspi-tree"))
-
-    def wait_for_tree(check, what):
-        with machine.nested(f"waiting for {what} in the AT-SPI tree"):
-            try:
-                retry(lambda _: check(tree()), 30)
-            except Exception:
-                print(json.dumps(tree()))
-                raise
-
-    def has(role, name):
-        return lambda t: [role, name] in t
-
-    def lacks(role, name):
-        """The bar is in the tree, without that node."""
-        return lambda t: bool(t) and [role, name] not in t
-
-    def keyboard_free():
-        """The bars ask for no keyboard (as when no popover is open)."""
-        layers = json.loads(niri("--json layers"))
-        ours = [layer for layer in layers if layer["namespace"] == "rust-wl-shell"]
-        return ours and all(layer["keyboard_interactivity"] == "None" for layer in ours)
-
-    def bars(t):
-        return len([role for role, _ in t if role in ("frame", "window")])
-
-    def labels():
-        return [name for role, name in tree() if role == "label"]
-
-    def active_workspace():
-        workspaces = json.loads(niri("--json workspaces"))
-        return next(w["idx"] for w in workspaces if w["output"] == "Virtual-1" and w["is_active"])
-
-    def dot(i):
-        """The i-th dot's centre (from 1): after the bar's padding (spacing, 8), each button
-        is the dot (6) and a quarter of the spacing either side."""
-        return (8 + (i - 1) * 10 + 5, HEIGHT // 2)
-
-    def right_items():
-        """The bar's right side, right to left, as (first, last) columns of white: the
-        clock, then each item; told apart by the gaps between them (at least 10 px). The
-        pointer, which niri draws, is moved away first."""
-        move(512, 400)
-        time.sleep(0.5)
-        shot = screen()
-        bright = [
-            x for x in range(1023, 600, -1)
-            if any(min(pixel(shot, x, y)) > 180 for y in range(4, HEIGHT - 4))
-        ]
-        items = []
-        for x in bright:
-            if items and items[-1][0] - x < 10:
-                items[-1][0] = x
-            else:
-                items.append([x, x])
-        return items
-
-    def popover_lines():
-        """The open popover's lines of white text, top to bottom, as (x, y) centres: rows of
-        pixels below the bar with white in them, grouped as the right items are."""
-        move(512, 700)
-        time.sleep(0.5)
-        shot = screen()
-        rows = []
-        for y in range(HEIGHT, 300):
-            xs = [x for x in range(500, 1024) if min(pixel(shot, x, y)) > 180]
-            if xs and rows and y - rows[-1][1] < 4:
-                top, _, left, right = rows[-1]
-                rows[-1] = [top, y, min(left, xs[0]), max(right, xs[-1])]
-            elif xs:
-                rows.append([y, y, xs[0], xs[-1]])
-        return [((left + right) // 2, (top + bottom) // 2) for top, bottom, left, right in rows]
-
-    def slider_trough(y):
-        """The open popover's slider at row y: the longest run of light pixels (the track,
-        its white part and the knob; not niri's grey around the popover), as (first, last)
-        columns."""
-        move(512, 700)
-        time.sleep(0.5)
-        shot = screen()
-        runs, run = [], []
-        for x in range(500, 1024):
-            if min(pixel(shot, x, y)) > 110 and not is_grey(pixel(shot, x, y)):
-                run.append(x)
-            elif run:
-                runs.append(run)
-                run = []
-        longest = max(runs + [run], key=len)
-        return longest[0], longest[-1]
-
-    def drag(start, end):
-        """A drag with the left button, from `start` to `end`, in steps."""
-        move(*start)
-        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
-        for i in range(1, 11):
-            move(start[0] + (end[0] - start[0]) * i // 10, start[1])
-            time.sleep(0.05)
-        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
-
+    ${session.helpers}
     def volume():
         """The default output's volume in percent, as pactl reads it."""
         out = as_user("pactl get-sink-volume @DEFAULT_SINK@")
@@ -425,24 +145,6 @@ pkgs.testers.runNixOSTest {
     def osd_shown(t):
         """The OSD's value, a label of digits alone, is in the tree."""
         return any(role == "label" and name.isdigit() for role, name in t)
-
-    def click_item(i):
-        """A click on the i-th item from the right (the clock is 0)."""
-        first, last = right_items()[i]
-        click((first + last) // 2, HEIGHT // 2)
-
-    def clock_text():
-        return machine.succeed(f"date '+{CLOCK}'").strip()
-
-    def spawn(command):
-        niri(f"action spawn -- {command}")
-
-    def is_grey(p):
-        return all(abs(c - GREY) <= 2 for c in p)
-
-    def is_tint(p):
-        # 0.35 black over grey, blurred or not.
-        return all(abs(c - round(GREY * 0.65)) <= 6 for c in p)
 
     machine.wait_for_unit("multi-user.target")
 
