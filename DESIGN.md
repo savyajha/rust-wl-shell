@@ -18,10 +18,11 @@ NetworkManager's requests.
 
 The two talk over tokio channels with data only. The core sends `Update`s, each a whole
 snapshot of one service (`Niri`, `Clock`, `Battery`, `Profiles`, `Audio`,
-`Backlight`, `Network`, `Bluetooth`, `NightLight`, `KeepAwake`), or an event for the dialog (`Joined`, `Prompt`,
+`Backlight`, `Network`, `Bluetooth`, `NightLight`, `KeepAwake`, `Notifications`), or an
+event for the dialog (`Joined`, `Prompt`,
 `PromptClosed`); the UI sends requests back on one sender per service (`Core::niri`,
 `profiles`, `audio`, `brightness`, `network`, `answers`, `bluetooth`, `night_light`,
-`keep_awake`). The UI awaits the update channel from a GLib future;
+`keep_awake`, `notifications`). The UI awaits the update channel from a GLib future;
 tokio's channels need no runtime on the receiving side.
 
 ## niri
@@ -234,6 +235,77 @@ new read of all its objects, coalesced over 100 ms.
   ext-idle-notify does not: niri 26.04 does not read logind's inhibitors (its source
   has no `BlockInhibited`), so an idle client of niri's alone (swayidle) does not wait.
 
+## Notifications
+
+`notifications.rs` (core) is the server: `org.freedesktop.Notifications` on a session
+bus connection of its own, claimed only with `notifications` on (while another server
+has the name, it logs that and serves nothing). Its narrow interface to the rest: the
+whole state (`Notifications`: Do Not Disturb, the banners, the history) on each change,
+and the UI's requests (`Expired`, `Dismiss`, `Action`, `ClearAll`, `Dnd`).
+
+- **The spec:** `Notify` (with `replaces_id`: the same id, its banner and history entry
+  replaced), `CloseNotification`, `GetCapabilities` (`actions`, `body`,
+  `body-markup`, `icon-static`, `persistence`, `x-kde-origin-name`; not
+  `body-hyperlinks`: Pango's markup has no links, so `<a ...>` and `</a>` are taken out
+  of a body, their text kept, as some apps send them anyway)
+  and `GetServerInformation`; the signals `NotificationClosed`, `ActionInvoked` and
+  `ActivationToken`. Hints read: `urgency`, `transient`, `image-data` (and its older
+  names), `image-path`, `x-kde-origin-name` (shown after the app's name). An
+  `image-data` is kept only if GTK can take it (8 bits, RGB or RGBA as its alpha says,
+  1 to 2048 px a side, rows at least as long as a row, and all its pixels there); else
+  it is left out, as GTK would fail on it. Summaries are cut to 1 KiB and bodies to
+  4 KiB, on a character's boundary.
+- **Banners and the history:** a notification goes to the history (newest first, 100 at
+  most; not a transient one) and, unless Do Not Disturb is on and it is not critical, to
+  the banners (three at most: past that, the oldest leaves as if its time were up). A
+  banner's time: the app's timeout, else 5 s; "never" (0) is `notification-max-timeout`
+  for a non-critical one (so a call's notification does not stay), and a critical one
+  stays until dismissed, whatever timeout its app gives.
+- **Closing:** a banner leaving is not a close, as with GNOME: the notification stays in
+  the history, still to be acted on. It is closed (`NotificationClosed`) when it is gone
+  from both: dismissed (× or a swipe, on a banner or in the history; reason 2), acted on
+  (2, after `ActivationToken` and `ActionInvoked`), cleared (2), closed by its app (3,
+  which removes the history entry too), or gone from both without the user (expired,
+  1): a transient one's banner gone, a transient one under Do Not Disturb (never
+  shown), one pushed out of the history's 100 while not on screen; a banner whose
+  window goes (its output gone) before its time is up. Closes that `Notify` itself
+  causes are sent just after its reply, so an app has the id before it hears of it.
+- **The file:** the history and Do Not Disturb, as JSON in
+  `$XDG_STATE_HOME/rust-wl-shell/notifications.json` (written whole on each change,
+  through a renamed temporary file), without images or actions: after a restart the
+  entries are kept but can no longer be acted on. The last id given is kept too, so
+  that ids are not given again after a restart, even with the history empty.
+
+In the UI (`notifications.rs`, `clock.rs`):
+
+- each banner is a window of its own on the overlay layer of the focused output (niri's),
+  anchored at the configured corner, 8 px from the edges (and below a bar, by its
+  exclusive zone), 360 px wide, frosted and rounded at 14 px as the dialog; they stack
+  from the corner, newest first. A banner shows the app's icon and name, ×, the image
+  (`image-data`, as a texture), the summary, the body in Pango markup (as it is, if it
+  does not parse) and up to three action buttons; an icon given as a `file://` URI or a
+  path is loaded from the file. Its timer pauses while the pointer is over it, and goes
+  with its window: a replaced notification's banner is built again, with its whole
+  time. While a clock's popover (the history) is open, the banners are hidden, their
+  timers still running.
+- a click on a banner runs its `default` action, with an activation token from GDK's
+  launch context (xdg-activation, niri's), so the app may raise its window.
+- a swipe (`notifications::swipe`): a horizontal `GtkGestureDrag`, or a two-finger
+  horizontal scroll (`GtkEventControllerScroll`; a wheel's steps count 40 px). The
+  banner follows it by its margin on its anchored side and fades; past 100 px it is
+  dismissed, short of it it goes back. The drag's offsets are in the banner's own
+  coordinates, which move with it, so each is added to where it was. History rows
+  swipe the same way, shifted by their margins.
+- known limits: the name is claimed once, at start (another server leaving it later is
+  not noticed); the banners stack by their heights as measured on the focused output,
+  so a banner shown on another output (the focus moved) can leave a gap; the `resident`
+  hint is not honoured (acting on a notification always closes it).
+- the clock is an item now: its popover has "Do Not Disturb" (a switch), then
+  "Notifications" with "Clear all", and the history grouped by app (the app with the
+  newest first), each entry a card as a banner's, with ×, swiped away, a click its
+  default action while it still has one; "No notifications" when empty. It scrolls
+  past 480 px.
+
 ## The backlight
 
 `backlight.rs` reads `/sys/class/backlight/<device>` (the config's `backlight`, a name,
@@ -320,6 +392,7 @@ one:
   a choice makes that output play. With no outputs the section is hidden.
 - the brightness: `display-brightness-symbolic`, hidden with no backlight; the popover
   has a slider.
+- the clock (`clock.rs`): the time, and the notifications' history (below).
 - the night light and keep awake (`toggles.rs`): click toggles with no popover, flat
   buttons as the items, filled with the accent while on (`night-light-symbolic`, the
   theme's moon; keep awake's cup is the shell's own `rust-wl-shell-keep-awake-symbolic`,
@@ -482,6 +555,13 @@ Unit tests (`cargo test`):
 - the arguments.
 - UPower's and power-profiles-daemon's properties to their snapshots; the keyboard
   layouts from niri's events; the items' icon names, short layout names and times.
+- the notifications' store: the timeouts (default, "never" capped, critical, a
+  critical one with a timeout); images GTK can take, and malformed ones; links' tags
+  taken out, texts cut on a boundary; closed when gone from both (transient under Do
+  Not Disturb, pushed out of the history); banners
+  newest first, three at most, the oldest leaving, a transient one pushed out closed as
+  expired; replacing, an app's close, a banner's time up (kept), "Clear all"; Do Not
+  Disturb; the file without banners; the history grouped by app.
 - the network from what NM lists: one row per SSID with its strongest signal, known
   networks first and the current one on top, the primary connection (wired over Wi-Fi,
   connecting, a VPN connecting not counting), the VPNs' states; Bluetooth from BlueZ's
@@ -587,6 +667,33 @@ is typed with the VM's keyboard, into whatever has the focus. It checks:
     awake", block) and logind's idle action (`IdleAction=lock` after 5 s, alice's
     session's idle hint set) does not come in 10 s; off, it comes ("System idle" in
     logind's journal) and the inhibitor is gone
+
+The notifications' VM test (`tests/notifications.nix`, in the same session) sends with
+notify-send (libnotify), calls with busctl, watches the signals with dbus-monitor, and
+scrolls sideways with ydotool's uinput mouse (QEMU's tablet sends no horizontal wheel).
+`notification-max-timeout` is 2 there. It checks:
+
+1. the shell owns the name: its server information and capabilities (no
+   `body-hyperlinks`); a malformed `image-data` (gdbus, 3 bytes for a 100x100 image)
+   leaves the banner without it, GTK never handed it, the shell still running
+2. a banner at the top right, below the bar (pixels), with the app's name, the summary
+   and the body's markup; four sent, three shown, the newest (with buttons) on top (the
+   first gap between banners comes late)
+3. the timeouts, each timed alike from before it is sent: "never" capped (2 s) well
+   before the default (5 s); a critical one stays; a transient one is not in the
+   history, and is closed as expired
+4. a replaced banner gets its whole time, the old one's timer gone; the banners hide
+   while the clock's popover is open (no notification layer in `niri msg layers`) and
+   come back; replaces_id: one entry, the new one; an app's CloseNotification: the banner and the
+   history entry gone, closed with reason 3
+5. a click on a banner: notify-send --wait sees "default", after an ActivationToken
+   with a token; a button: its key
+6. a drag sideways dismisses (reason 2, not in the history), a horizontal scroll too
+7. the history in the clock's popover, "Clear all", and the keyboard back with the
+   window after each popover
+8. Do Not Disturb: no banner, but for a critical one, the history still filling; a
+   transient one (`notify-send --wait -e`) returns at once, its close after its id; after
+   a restart of the shell's unit the history and Do Not Disturb are still there
 
 In the bar's test, items and popover rows are found by their pixels (white on the tint, apart by gaps),
 not by AT-SPI's extents, which in this VM are off by about 17 px from where GTK lays

@@ -75,6 +75,9 @@ backlight "amdgpu_bl1"
 | `night-light` | `true` | Show the night light toggle, when its unit exists. |
 | `night-light-unit` | `"wlsunset.service"` | The user unit the night light starts and stops (wlsunset, as home-manager's `services.wlsunset` runs it). |
 | `keep-awake` | `true` | Show the keep awake toggle: while on, a logind idle inhibitor. |
+| `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock has no popover. |
+| `notification-position` | `"top-right"` | Where banners show on the focused output: `"top-left"`, `"top"`, `"top-right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`. |
+| `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
 | `backlight` | the first | The backlight device to follow, by its name in `/sys/class/backlight`. |
 
 The four sizes follow the height unless set, in macOS's proportions at 24 px; each must be
@@ -107,6 +110,15 @@ NetworkManager's polkit rules (on NixOS, in the `networkmanager` group). With NM
 backend, an enterprise network's server is checked against the system's CA bundle,
 which iwd reads only if it holds plain certificates: on NixOS, set
 `security.pki.useCompatibleBundle = true`.
+
+Notifications show as banners on the focused output (top right by default), at most
+three, newest nearest the corner, each for its app's timeout or 5 s (paused while the
+pointer is over it); one that asks never to expire still leaves after
+`notification-max-timeout`, unless it is critical. A click runs its default action, its
+buttons their actions, × or a swipe sideways (a drag, or two fingers on a touchpad)
+dismisses it. The clock opens the history, grouped by app, with × and "Clear all", and a
+Do Not Disturb switch (no banners but critical ones); both are kept in
+`$XDG_STATE_HOME/rust-wl-shell/notifications.json` across restarts.
 
 The OSD, a pill near the bottom of the focused output, shows the volume or brightness
 for 1.5 s when it changes from outside the shell (the keys, wpctl, brightnessctl), not

@@ -324,6 +324,17 @@ in
             time.sleep(0.05)
         input_events({"type": "btn", "data": {"down": False, "button": "left"}})
 
+    def act(name, role=""):
+        """The first action (a click) of the bar's node named `name` (and of that role),
+        through AT-SPI."""
+        as_user(f"atspi-tree --do '{name}' '{role}'" if role else f"atspi-tree --do '{name}'")
+
+    def typing_reaches_the_window(word):
+        """The keyboard is back with the focused window, a foot running alice's shell."""
+        retry(lambda _: keyboard_free(), 10)
+        machine.send_chars(f"touch {word}\n")
+        machine.wait_for_file(f"/home/${user}/{word}", timeout=10)
+
     def click_item(i):
         """A click on the i-th item from the right (the clock is 0)."""
         first, last = right_items()[i]

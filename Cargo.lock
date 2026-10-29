@@ -1411,6 +1411,7 @@ dependencies = [
  "miette",
  "niri-ipc",
  "nmrs",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

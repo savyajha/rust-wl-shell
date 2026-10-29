@@ -67,6 +67,16 @@ pub struct Config {
     pub night_light: bool,
     #[knuffel(child, unwrap(argument), default = "wlsunset.service".into())]
     pub night_light_unit: String,
+    /// The notification server; off, the shell leaves the name to another.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub notifications: bool,
+    /// Where banners show on the focused output.
+    #[knuffel(child, unwrap(argument), default)]
+    pub notification_position: Corner,
+    /// The longest, in seconds, a banner that asks to stay ("never expires") stays; only
+    /// critical ones stay until dismissed.
+    #[knuffel(child, unwrap(argument), default = 10)]
+    pub notification_max_timeout: u32,
     /// Keeping the machine awake: holding an idle inhibitor.
     #[knuffel(child, unwrap(argument), default = true)]
     pub keep_awake: bool,
@@ -81,6 +91,17 @@ pub enum Position {
     Top,
     /// Only while it runs next to another bar at the top.
     Bottom,
+}
+
+#[derive(knuffel::DecodeScalar, Clone, Copy, Debug, Default, PartialEq)]
+pub enum Corner {
+    TopLeft,
+    Top,
+    #[default]
+    TopRight,
+    BottomLeft,
+    Bottom,
+    BottomRight,
 }
 
 /// The bar's sizes in logical pixels, after the defaults.
@@ -229,6 +250,9 @@ mod tests {
             night-light false
             night-light-unit "gammastep.service"
             keep-awake false
+            notifications false
+            notification-position "bottom-left"
+            notification-max-timeout 20
             backlight "amdgpu_bl1"
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
@@ -258,6 +282,9 @@ mod tests {
                 night_light: false,
                 night_light_unit: "gammastep.service".into(),
                 keep_awake: false,
+                notifications: false,
+                notification_position: Corner::BottomLeft,
+                notification_max_timeout: 20,
                 backlight: Some("amdgpu_bl1".into()),
             }
         );

@@ -2,6 +2,7 @@
 //! the brightness, the volume, VPN, Bluetooth, the network, the battery (with the power
 //! mode) and the clock on the right.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::{self as gtk, gdk, prelude::*};
@@ -9,14 +10,16 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::{Component, ComponentParts, ComponentSender};
 use shell_core::config::{Config, Position};
 use shell_core::niri::{self, Workspace};
-use shell_core::{Update, audio, bluetooth, network};
+use shell_core::{Update, audio, bluetooth, network, notifications};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::bluetooth::BluetoothItem;
 use crate::blur::Blur;
+use crate::clock::ClockItem;
 use crate::dialog::Dialog;
 use crate::items::{BatteryItem, LayoutItem};
 use crate::network::{NetworkItem, VpnItem};
+use crate::notifications::Banners;
 use crate::popover::Item;
 use crate::sliders::{BrightnessItem, VolumeItem};
 use crate::toggles::{self, Toggle};
@@ -29,7 +32,8 @@ pub struct Bar {
     all: Vec<Workspace>,
     workspaces: Vec<Workspace>,
     app: String,
-    clock: String,
+    /// The clock, with the notifications' history in its popover.
+    clock: ClockItem,
     /// Each one `None` when the config switches it off.
     layout: Option<LayoutItem>,
     brightness: Option<BrightnessItem>,
@@ -55,6 +59,9 @@ pub struct Init {
     pub bluetooth: UnboundedSender<bluetooth::Request>,
     pub night_light: UnboundedSender<bool>,
     pub keep_awake: UnboundedSender<bool>,
+    pub notifications: UnboundedSender<notifications::Request>,
+    /// The shell's banners, hidden while the clock's popover is open.
+    pub banners: Rc<RefCell<Banners>>,
     /// The shell's one password dialog.
     pub dialog: Rc<Dialog>,
     pub blur: Option<Rc<Blur>>,
@@ -98,12 +105,6 @@ impl Component for Bar {
                 #[name = "right"]
                 set_end_widget = &gtk::Box {
                     add_css_class: "right",
-                    #[name = "clock"]
-                    gtk::Label {
-                        add_css_class: "clock",
-                        #[watch]
-                        set_label: &model.clock,
-                    },
                 },
             },
         }
@@ -135,7 +136,11 @@ impl Component for Bar {
             all: Vec::new(),
             workspaces: Vec::new(),
             app: String::new(),
-            clock: String::new(),
+            clock: ClockItem::new(
+                config.notifications.then(|| init.notifications.clone()),
+                init.banners.clone(),
+                &init.blur,
+            ),
             layout: (config.keyboard_layout)
                 .then(|| LayoutItem::new(init.niri.clone(), &init.blur)),
             brightness: (config.brightness)
@@ -179,8 +184,9 @@ impl Component for Bar {
             item(model.battery.as_ref().map(|i| &i.item)),
         ];
         for button in buttons.into_iter().flatten() {
-            button.insert_before(&widgets.right, Some(&widgets.clock));
+            widgets.right.append(&button);
         }
+        widgets.right.append(&model.clock.item.button);
         ComponentParts { model, widgets }
     }
 
@@ -198,7 +204,8 @@ impl Component for Bar {
                     layout.show(&snapshot.layouts, snapshot.layout);
                 }
             }
-            Msg::Update(Update::Clock(clock)) => self.clock = clock,
+            Msg::Update(Update::Clock(clock)) => self.clock.label.set_label(&clock),
+            Msg::Update(Update::Notifications(state)) => self.clock.show(&state),
             Msg::Update(Update::Battery(battery)) => {
                 if let Some(item) = &self.battery {
                     item.show(battery.as_ref());

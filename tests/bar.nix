@@ -161,6 +161,16 @@ pkgs.testers.runNixOSTest {
         out = as_user("pactl get-sink-volume @DEFAULT_SINK@")
         return int(re.findall(r"(\d+)%", out)[0])
 
+    def glimpse(check, what):
+        """`check` true of the tree at some point in 10 s, the tree read again and again
+        (not once a second): for the OSD, shown for 1.5 s."""
+        with machine.nested(f"glimpsing {what} in the AT-SPI tree"):
+            end = time.time() + 10
+            while time.time() < end:
+                if check(tree()):
+                    return
+            raise AssertionError(f"no {what}")
+
     def osd_shown(t):
         """The OSD's value, a label of digits alone, is in the tree."""
         return any(role == "label" and name.isdigit() for role, name in t)
@@ -222,8 +232,9 @@ pkgs.testers.runNixOSTest {
         assert not osd_shown(t), "an OSD at start-up"
         # From outside the shell: the item follows, and the OSD shows, then hides.
         as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.30")
+        # The OSD first: it shows for 1.5 s only, the item stays.
+        glimpse(has("label", "30"), "the OSD with 30")
         wait_for_tree(has("button", "Volume 30%"), "the volume item at 30 %")
-        wait_for_tree(has("label", "30"), "the OSD with 30")
         machine.send_monitor_command(f"screendump {machine.out_dir}/osd.ppm gpu 0")
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden after 1.5 s")
         # Its popover: Sound, the slider (after its mute button), Output, and a row per
@@ -282,8 +293,9 @@ pkgs.testers.runNixOSTest {
         retry(lambda _: keyboard_free(), 10)
         # Mute from outside: the item says so, and the OSD shows.
         as_user("wpctl set-mute @DEFAULT_AUDIO_SINK@ 1")
+        # The OSD first: it shows for 1.5 s only, the item stays.
+        glimpse(osd_shown, "the OSD for mute")
         wait_for_tree(has("button", "Volume muted"), "the volume item muted")
-        wait_for_tree(osd_shown, "the OSD for mute")
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden")
         # The server restarted: the item goes, and comes back once it does.
         as_user("systemctl --user restart pipewire-pulse.service")
@@ -388,7 +400,7 @@ pkgs.testers.runNixOSTest {
             return not is_grey(pixel(shot, width // 2, height - 48 - 22))
         niri("action focus-monitor-right")
         as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.55")
-        wait_for_tree(has("label", "55"), "the OSD with 55")
+        glimpse(has("label", "55"), "the OSD with 55")
         assert osd_on(1) and not osd_on(0), "the OSD not on the focused output"
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden")
         niri("output Virtual-2 off")
@@ -396,7 +408,7 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(lambda t: bars(t) == 1, "one bar")
         # Its output gone, the OSD shows on the one left.
         as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.65")
-        wait_for_tree(has("label", "65"), "the OSD with 65")
+        glimpse(has("label", "65"), "the OSD with 65")
         retry(lambda _: osd_on(0), 5)
         machine.send_monitor_command(f"screendump {machine.out_dir}/osd-moved.ppm gpu 0")
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden again")

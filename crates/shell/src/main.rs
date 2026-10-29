@@ -6,9 +6,11 @@
 mod bar;
 mod bluetooth;
 mod blur;
+mod clock;
 mod dialog;
 mod items;
 mod network;
+mod notifications;
 mod osd;
 mod popover;
 mod shell;

@@ -197,19 +197,8 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     ${session.helpers}
 
-    def act(name, role=""):
-        """The first action (a click) of the bar's node named `name` (and of that role),
-        through AT-SPI."""
-        as_user(f"atspi-tree --do '{name}' '{role}'" if role else f"atspi-tree --do '{name}'")
-
     def dialog_open(t):
         return any(name.endswith("Required") for role, name in t if role == "label")
-
-    def typing_reaches_the_window(word):
-        """The keyboard is back with the focused window, a foot running alice's shell."""
-        retry(lambda _: keyboard_free(), 10)
-        machine.send_chars(f"touch {word}\n")
-        machine.wait_for_file(f"/home/${user}/{word}", timeout=10)
 
     def item(prefix):
         """The item whose name starts so: its toggle (by AT-SPI, as the icons' pixels do

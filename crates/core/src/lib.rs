@@ -13,11 +13,13 @@ pub mod keep_awake;
 pub mod network;
 pub mod night_light;
 pub mod niri;
+pub mod notifications;
 pub mod power_profiles;
 pub mod upower;
 pub mod xkb;
 
 use std::thread;
+use std::time::Duration;
 
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
@@ -50,6 +52,7 @@ pub enum Update {
     NightLight(Option<bool>),
     /// Whether the idle inhibitor is held.
     KeepAwake(bool),
+    Notifications(notifications::Notifications),
 }
 
 /// The core's side of the channels.
@@ -69,6 +72,7 @@ pub struct Core {
     pub night_light: UnboundedSender<bool>,
     /// Whether to keep awake.
     pub keep_awake: UnboundedSender<bool>,
+    pub notifications: UnboundedSender<notifications::Request>,
 }
 
 /// Start the core's thread, and the audio's, with the services the config's items need
@@ -80,6 +84,9 @@ pub fn start(config: &config::Config) -> Core {
     let bluetooth_on = config.bluetooth;
     let night_light_unit = config.night_light.then(|| config.night_light_unit.clone());
     let keep_awake_on = config.keep_awake;
+    let notifications_cap = config
+        .notifications
+        .then(|| Duration::from_secs(config.notification_max_timeout.into()));
     let (update_tx, updates) = mpsc::unbounded_channel();
     let (niri, niri_rx) = mpsc::unbounded_channel();
     let (profiles, profile_rx) = mpsc::unbounded_channel();
@@ -89,6 +96,7 @@ pub fn start(config: &config::Config) -> Core {
     let (bluetooth, bluetooth_rx) = mpsc::unbounded_channel();
     let (night_light, night_light_rx) = mpsc::unbounded_channel();
     let (keep_awake, keep_awake_rx) = mpsc::unbounded_channel();
+    let (notifications, notifications_rx) = mpsc::unbounded_channel();
     let audio = audio::start(update_tx.downgrade());
     thread::Builder::new()
         .name("core".into())
@@ -103,6 +111,10 @@ pub fn start(config: &config::Config) -> Core {
                 tokio::spawn(clock::run(clock_format, update_tx.clone(), bus_rx));
                 if network_on {
                     tokio::spawn(network::run(update_tx.clone(), network_rx));
+                }
+                if let Some(cap) = notifications_cap {
+                    let served = notifications::run(cap, update_tx.clone(), notifications_rx);
+                    tokio::spawn(served);
                 }
                 if let Some(unit) = night_light_unit {
                     tokio::spawn(night_light::run(unit, update_tx.clone(), night_light_rx));
@@ -148,5 +160,6 @@ pub fn start(config: &config::Config) -> Core {
         bluetooth,
         night_light,
         keep_awake,
+        notifications,
     }
 }

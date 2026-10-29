@@ -8,7 +8,7 @@ use gio_unix::DesktopAppInfo;
 use gtk4::{gdk, gio, glib, prelude::*};
 use relm4::{Component, ComponentController, Controller};
 use shell_core::config::Config;
-use shell_core::{Core, Update, audio, bluetooth, network, niri};
+use shell_core::{Core, Update, audio, bluetooth, network, niri, notifications};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
@@ -16,6 +16,7 @@ use crate::Marks;
 use crate::bar::{self, Bar, Msg};
 use crate::blur::Blur;
 use crate::dialog::Dialog;
+use crate::notifications::Banners;
 use crate::osd::Osd;
 use crate::sliders::{self, BRIGHTNESS};
 
@@ -29,6 +30,8 @@ struct Shell {
     bluetooth: UnboundedSender<bluetooth::Request>,
     night_light: UnboundedSender<bool>,
     keep_awake: UnboundedSender<bool>,
+    notifications: UnboundedSender<notifications::Request>,
+    banners: Rc<RefCell<Banners>>,
     dialog: Rc<Dialog>,
     osd: Option<Osd>,
     blur: Option<Rc<Blur>>,
@@ -59,6 +62,7 @@ pub fn start(
         bluetooth,
         night_light,
         keep_awake,
+        notifications,
     } = core;
     let blur = Blur::new(display).map(Rc::new);
     let shell = Rc::new(RefCell::new(Shell {
@@ -71,6 +75,12 @@ pub fn start(
         bluetooth,
         night_light,
         keep_awake,
+        banners: Rc::new(RefCell::new(Banners::new(
+            config.notification_position,
+            notifications.clone(),
+            blur.clone(),
+        ))),
+        notifications,
         osd: config.osd.then(|| Osd::new(&blur)),
         config: Rc::new(config),
         blur,
@@ -129,6 +139,8 @@ impl Shell {
                 bluetooth: self.bluetooth.clone(),
                 night_light: self.night_light.clone(),
                 keep_awake: self.keep_awake.clone(),
+                notifications: self.notifications.clone(),
+                banners: self.banners.clone(),
                 dialog: self.dialog.clone(),
                 blur: self.blur.clone(),
             })
@@ -149,6 +161,10 @@ impl Shell {
             Update::Prompt(prompt) => return self.dialog.ask(prompt),
             Update::PromptClosed(id) => return self.dialog.closed(id),
             _ => {}
+        }
+        if let Update::Notifications(state) = &update {
+            let focused = self.focused();
+            self.banners.borrow_mut().show(state, focused.as_ref());
         }
         if let Update::Niri(snapshot) = &update {
             self.dialog.focus(snapshot.focused_output.clone());
@@ -200,16 +216,19 @@ impl Shell {
             }
             _ => return,
         };
+        osd.show(icon, level, self.focused().as_ref());
+    }
+
+    /// The focused output's monitor, as niri last said.
+    fn focused(&self) -> Option<gdk::Monitor> {
         let focused = self.latest.iter().find_map(|latest| match latest {
             Update::Niri(snapshot) => snapshot.focused_output.clone(),
             _ => None,
         });
-        let monitor = self
-            .bars
-            .iter()
-            .map(|(monitor, _)| monitor)
-            .find(|monitor| focused.is_some() && monitor.connector().map(String::from) == focused);
-        osd.show(icon, level, monitor);
+        let mut monitors = self.bars.iter().map(|(monitor, _)| monitor);
+        let monitor =
+            monitors.find(|m| focused.is_some() && m.connector().map(String::from) == focused);
+        monitor.cloned()
     }
 }
 

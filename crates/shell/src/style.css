@@ -264,3 +264,47 @@ window.dialog button.suggested {
   background: @accent_bg_color;
   color: @accent_fg_color;
 }
+
+/* A notification's banner: frosted as a popover, a little larger; the app's name dim
+   above the summary, in bold, and the body. In the clock's popover, its rows. */
+window.notification {
+  background-color: rgba(0, 0, 0, 0.35);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.card .app {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.card .summary {
+  font-weight: 700;
+}
+
+.card button.close,
+popover.item-popover button.clear {
+  all: unset;
+  opacity: 0.7;
+  padding: 0 4px;
+}
+
+.card .actions button {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  border: none;
+  box-shadow: none;
+  border-radius: 9999px;
+}
+
+popover.item-popover .history .card.row {
+  padding: 6px;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+popover.item-popover .history {
+  min-width: 320px;
+}
