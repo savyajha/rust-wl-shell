@@ -34,6 +34,7 @@
 #      no OSD; an outside mute shows the OSD; the server restarted, the item comes back.
 #      No backlight in the VM: no brightness item.
 #  13. the OSD shows on the focused output; with that output switched off, on another
+#  15. no wlsunset unit: no night light item
 #  14. a popover's arrow points at its item: drawn, blurred within, and not beside it;
 #      from a bottom bar (a second shell), no line across its base
 
@@ -95,6 +96,9 @@ pkgs.testers.runNixOSTest {
         spacing = 8;
         dot-size = 6;
         clock-format = "%H:%M %d/%m";
+        # Off, so the items' places stay as the test counts them; the night light is on,
+        # but hidden: the VM has no wlsunset unit.
+        keep-awake = false;
       })
     ];
     environment.systemPackages = [
@@ -170,6 +174,8 @@ pkgs.testers.runNixOSTest {
         print(json.dumps(tree()))
         for mark in ["ms: gtk_init", "ms: first frame", "blur on"]:
             assert mark in journal, mark
+        assert "no night light: no unit wlsunset.service" in journal, journal
+        assert not [n for _, n in tree() if n.startswith("Night light")], tree()
         unit = as_user("systemctl --user cat rust-wl-shell.service")
         assert "GDK_DEBUG" not in unit and "GSK_RENDERER" not in unit, unit
 

@@ -44,6 +44,12 @@ rustPlatform.buildRustPackage {
     libpulseaudio
   ];
 
+  # The shell's own icons (crates/shell/src/main.rs).
+  RUST_WL_SHELL_ICONS = "${placeholder "out"}/share/rust-wl-shell/icons";
+  postInstall = ''
+    install -Dm644 -t $out/share/rust-wl-shell/icons crates/shell/icons/*.svg
+  '';
+
   # The keyboard layouts' short names (crates/core/src/xkb.rs).
   XKB_EVDEV_XML = "${xkeyboard_config}/share/X11/xkb/rules/evdev.xml";
 

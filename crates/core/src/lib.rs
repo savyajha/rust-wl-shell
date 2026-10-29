@@ -9,7 +9,9 @@ pub mod bluetooth;
 mod bus;
 pub mod clock;
 pub mod config;
+pub mod keep_awake;
 pub mod network;
+pub mod night_light;
 pub mod niri;
 pub mod power_profiles;
 pub mod upower;
@@ -44,6 +46,10 @@ pub enum Update {
     PromptClosed(u64),
     /// `None`: no BlueZ, or no adapter.
     Bluetooth(Option<bluetooth::Bluetooth>),
+    /// Whether the night light's unit is active; `None`: no such unit.
+    NightLight(Option<bool>),
+    /// Whether the idle inhibitor is held.
+    KeepAwake(bool),
 }
 
 /// The core's side of the channels.
@@ -59,6 +65,10 @@ pub struct Core {
     pub network: UnboundedSender<network::Request>,
     pub answers: UnboundedSender<agent::Answer>,
     pub bluetooth: UnboundedSender<bluetooth::Request>,
+    /// The night light (its unit) to switch on or off.
+    pub night_light: UnboundedSender<bool>,
+    /// Whether to keep awake.
+    pub keep_awake: UnboundedSender<bool>,
 }
 
 /// Start the core's thread, and the audio's, with the services the config's items need
@@ -68,6 +78,8 @@ pub fn start(config: &config::Config) -> Core {
     let network_on = config.network || config.vpn;
     let agent_on = network_on && config.secret_agent;
     let bluetooth_on = config.bluetooth;
+    let night_light_unit = config.night_light.then(|| config.night_light_unit.clone());
+    let keep_awake_on = config.keep_awake;
     let (update_tx, updates) = mpsc::unbounded_channel();
     let (niri, niri_rx) = mpsc::unbounded_channel();
     let (profiles, profile_rx) = mpsc::unbounded_channel();
@@ -75,6 +87,8 @@ pub fn start(config: &config::Config) -> Core {
     let (network, network_rx) = mpsc::unbounded_channel();
     let (answers, answer_rx) = mpsc::unbounded_channel();
     let (bluetooth, bluetooth_rx) = mpsc::unbounded_channel();
+    let (night_light, night_light_rx) = mpsc::unbounded_channel();
+    let (keep_awake, keep_awake_rx) = mpsc::unbounded_channel();
     let audio = audio::start(update_tx.downgrade());
     thread::Builder::new()
         .name("core".into())
@@ -89,6 +103,9 @@ pub fn start(config: &config::Config) -> Core {
                 tokio::spawn(clock::run(clock_format, update_tx.clone(), bus_rx));
                 if network_on {
                     tokio::spawn(network::run(update_tx.clone(), network_rx));
+                }
+                if let Some(unit) = night_light_unit {
+                    tokio::spawn(night_light::run(unit, update_tx.clone(), night_light_rx));
                 }
                 let updates = update_tx.clone();
                 // The services on the system bus share one connection, which the clock gets
@@ -105,6 +122,9 @@ pub fn start(config: &config::Config) -> Core {
                     tokio::spawn(upower::run(bus.clone(), updates.clone()));
                     if agent_on {
                         tokio::spawn(agent::run(bus.clone(), updates.clone(), answer_rx));
+                    }
+                    if keep_awake_on {
+                        tokio::spawn(keep_awake::run(bus.clone(), updates.clone(), keep_awake_rx));
                     }
                     if bluetooth_on {
                         tokio::spawn(bluetooth::run(bus.clone(), updates.clone(), bluetooth_rx));
@@ -126,5 +146,7 @@ pub fn start(config: &config::Config) -> Core {
         network,
         answers,
         bluetooth,
+        night_light,
+        keep_awake,
     }
 }

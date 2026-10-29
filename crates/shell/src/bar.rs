@@ -17,7 +17,9 @@ use crate::blur::Blur;
 use crate::dialog::Dialog;
 use crate::items::{BatteryItem, LayoutItem};
 use crate::network::{NetworkItem, VpnItem};
+use crate::popover::Item;
 use crate::sliders::{BrightnessItem, VolumeItem};
+use crate::toggles::{self, Toggle};
 
 pub struct Bar {
     /// Its connector is the output's name, as niri names outputs.
@@ -31,6 +33,8 @@ pub struct Bar {
     /// Each one `None` when the config switches it off.
     layout: Option<LayoutItem>,
     brightness: Option<BrightnessItem>,
+    night_light: Option<Toggle>,
+    keep_awake: Option<Toggle>,
     volume: Option<VolumeItem>,
     vpn: Option<VpnItem>,
     bluetooth: Option<BluetoothItem>,
@@ -49,6 +53,8 @@ pub struct Init {
     pub brightness: UnboundedSender<u8>,
     pub network: UnboundedSender<network::Request>,
     pub bluetooth: UnboundedSender<bluetooth::Request>,
+    pub night_light: UnboundedSender<bool>,
+    pub keep_awake: UnboundedSender<bool>,
     /// The shell's one password dialog.
     pub dialog: Rc<Dialog>,
     pub blur: Option<Rc<Blur>>,
@@ -134,6 +140,18 @@ impl Component for Bar {
                 .then(|| LayoutItem::new(init.niri.clone(), &init.blur)),
             brightness: (config.brightness)
                 .then(|| BrightnessItem::new(init.brightness.clone(), &init.blur)),
+            night_light: (config.night_light).then(|| {
+                let sent = init.night_light.clone();
+                Toggle::new(toggles::NIGHT_LIGHT, "Night light", move |on| {
+                    let _ = sent.send(on);
+                })
+            }),
+            keep_awake: (config.keep_awake).then(|| {
+                let sent = init.keep_awake.clone();
+                Toggle::new(toggles::KEEP_AWAKE, "Keep awake", move |on| {
+                    let _ = sent.send(on);
+                })
+            }),
             volume: (config.volume).then(|| VolumeItem::new(init.audio.clone(), &init.blur)),
             vpn: (config.vpn).then(|| VpnItem::new(init.network.clone(), &init.blur)),
             bluetooth: (config.bluetooth)
@@ -146,15 +164,20 @@ impl Component for Bar {
             }),
         };
         let widgets = view_output!();
-        let layout = model.layout.as_ref().map(|item| &item.item.button);
-        let brightness = model.brightness.as_ref().map(|item| &item.item.button);
-        let volume = model.volume.as_ref().map(|item| &item.item.button);
-        let vpn = model.vpn.as_ref().map(|item| &item.item.button);
-        let bluetooth = model.bluetooth.as_ref().map(|item| &item.item.button);
-        let network = model.network.as_ref().map(|item| &item.item.button);
-        let battery = model.battery.as_ref().map(|item| &item.item.button);
+        let item = |item: Option<&Item>| item.map(|i| i.button.clone().upcast::<gtk::Widget>());
+        let toggle = |toggle: &Option<Toggle>| toggle.as_ref().map(|t| t.button.clone().upcast());
         // Before the clock, in this order.
-        let buttons = [layout, brightness, volume, vpn, bluetooth, network, battery];
+        let buttons = [
+            item(model.layout.as_ref().map(|i| &i.item)),
+            item(model.brightness.as_ref().map(|i| &i.item)),
+            toggle(&model.night_light),
+            toggle(&model.keep_awake),
+            item(model.volume.as_ref().map(|i| &i.item)),
+            item(model.vpn.as_ref().map(|i| &i.item)),
+            item(model.bluetooth.as_ref().map(|i| &i.item)),
+            item(model.network.as_ref().map(|i| &i.item)),
+            item(model.battery.as_ref().map(|i| &i.item)),
+        ];
         for button in buttons.into_iter().flatten() {
             button.insert_before(&widgets.right, Some(&widgets.clock));
         }
@@ -202,6 +225,16 @@ impl Component for Bar {
                 }
                 if let Some(item) = &self.vpn {
                     item.show(network.as_ref());
+                }
+            }
+            Msg::Update(Update::NightLight(on)) => {
+                if let Some(toggle) = &self.night_light {
+                    toggle.show(on);
+                }
+            }
+            Msg::Update(Update::KeepAwake(on)) => {
+                if let Some(toggle) = &self.keep_awake {
+                    toggle.show(Some(on));
                 }
             }
             Msg::Update(Update::Bluetooth(bluetooth)) => {

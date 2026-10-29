@@ -27,6 +27,11 @@
 #  10. Bluetooth: the paired devices (the battery's level after one), connect and
 #      disconnect, and the adapter's switch
 #  11. none of the passwords typed is in the system's or alice's journal
+#  12. the night light (a stand-in wlsunset unit): on with its unit, the item filled
+#      with the accent; a click stops the unit and another starts it; stopped with
+#      systemctl, the item follows
+#  13. keep awake: off at start; on, logind lists its idle inhibitor (block) and its
+#      idle action (lock, 5 s) waits; off, the action comes
 
 {
   pkgs,
@@ -164,6 +169,18 @@ pkgs.testers.runNixOSTest {
           --dhcp-range=10.3.0.10,10.3.0.50 &
         exec $n hostapd /run/ap/home.conf /run/ap/cafe.conf /run/ap/campus.conf
       '';
+    };
+
+    # A stand-in for wlsunset, as home-manager runs it: started with the session.
+    systemd.user.services.wlsunset = {
+      wantedBy = [ "graphical-session.target" ];
+      serviceConfig.ExecStart = "${pkgs.coreutils}/bin/sleep infinity";
+    };
+    # logind's own action on idle (a lock, logged), which waits while idle is inhibited:
+    # what keep awake is tested against.
+    services.logind.settings.Login = {
+      IdleAction = "lock";
+      IdleActionSec = "5";
     };
 
     services.dbus.packages = [ fakes.policy ];
@@ -446,6 +463,60 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(has("button", "Bluetooth: off"), "the adapter off")
         item("Bluetooth")
         typing_reaches_the_window("after-bluetooth")
+
+    def accent_pixels():
+        """The bar's pixels in GTK's default accent (#3584e4): a toggle that is on."""
+        move(512, 400)
+        time.sleep(0.5)
+        shot = screen()
+        return sum(
+            1 for x in range(0, 1024, 2) for y in range(2, HEIGHT - 2)
+            if (lambda p: p[2] > 180 and p[0] < 100)(pixel(shot, x, y))
+        )
+
+    with subtest("the night light starts and stops its unit, and follows it"):
+        wait_for_tree(has("button", "Night light: on"), "the night light, on with its unit")
+        assert accent_pixels() > 50
+        act("Night light: on")
+        machine.wait_until_fails(f"{PREFIX} systemctl --user is-active wlsunset", timeout=10)
+        wait_for_tree(has("button", "Night light: off"), "the night light off")
+        assert accent_pixels() < 5
+        act("Night light: off")
+        machine.wait_until_succeeds(f"{PREFIX} systemctl --user is-active wlsunset", timeout=10)
+        wait_for_tree(has("button", "Night light: on"), "the night light on again")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/toggles.ppm gpu 0")
+        # Stopped from outside, the item follows.
+        as_user("systemctl --user stop wlsunset")
+        wait_for_tree(has("button", "Night light: off"), "the night light off, from outside")
+        typing_reaches_the_window("after-night-light")
+
+    with subtest("keep awake holds an idle inhibitor, which logind's idle action waits for"):
+        wait_for_tree(has("button", "Keep awake: off"), "keep awake, off at start")
+        act("Keep awake: off")
+        wait_for_tree(has("button", "Keep awake: on"), "keep awake on")
+        assert accent_pixels() > 50
+        inhibitors = machine.succeed("systemd-inhibit --list --no-pager")
+        print(inhibitors)
+        line = next(line for line in inhibitors.splitlines() if "rust-wl-shell" in line)
+        assert "idle" in line and "Keep awake" in line and "block" in line, line
+        # alice's session idle from now on: logind would lock after 5 s, but waits.
+        sid = machine.succeed("loginctl show-user ${user} -p Display --value").strip()
+        path = machine.succeed(
+            f"busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 "
+            f"org.freedesktop.login1.Manager GetSession s {sid}"
+        )
+        session = json.loads(path)["data"][0] + " org.freedesktop.login1.Session"
+        as_user(f"busctl call org.freedesktop.login1 {session} SetIdleHint b false")
+        as_user(f"busctl call org.freedesktop.login1 {session} SetIdleHint b true")
+        since = machine.succeed("date '+%Y-%m-%d %H:%M:%S'").strip()
+        idled = f"journalctl -u systemd-logind --since '{since}' | grep -q 'System idle'"
+        time.sleep(10)
+        machine.fail(idled)
+        act("Keep awake: on")
+        wait_for_tree(has("button", "Keep awake: off"), "keep awake off")
+        machine.wait_until_succeeds(idled, timeout=20)
+        assert "rust-wl-shell" not in machine.succeed("systemd-inhibit --list --no-pager")
+        typing_reaches_the_window("after-keep-awake")
 
     with subtest("no secret in the journals"):
         secrets = ["correct-horse", "wrong-password", "campus-pass", "not-the-password",

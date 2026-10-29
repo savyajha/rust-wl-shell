@@ -18,9 +18,10 @@ NetworkManager's requests.
 
 The two talk over tokio channels with data only. The core sends `Update`s, each a whole
 snapshot of one service (`Niri`, `Clock`, `Battery`, `Profiles`, `Audio`,
-`Backlight`, `Network`, `Bluetooth`), or an event for the dialog (`Joined`, `Prompt`,
+`Backlight`, `Network`, `Bluetooth`, `NightLight`, `KeepAwake`), or an event for the dialog (`Joined`, `Prompt`,
 `PromptClosed`); the UI sends requests back on one sender per service (`Core::niri`,
-`profiles`, `audio`, `brightness`, `network`, `answers`, `bluetooth`). The UI awaits the update channel from a GLib future;
+`profiles`, `audio`, `brightness`, `network`, `answers`, `bluetooth`, `night_light`,
+`keep_awake`). The UI awaits the update channel from a GLib future;
 tokio's channels need no runtime on the receiving side.
 
 ## niri
@@ -214,6 +215,25 @@ requests set `Powered`, or call a device's `Connect` or `Disconnect`. There is n
 pairing. A known limit: every signal from BlueZ (any object's, any property's) means a
 new read of all its objects, coalesced over 100 ms.
 
+## The night light and keep awake
+
+- **The night light** (`night_light.rs`) is wlsunset's, run by home-manager as a user
+  unit; the shell starts and stops that unit (`night-light-unit`, by default
+  `wlsunset.service`) through systemd's `org.freedesktop.systemd1` on the session bus.
+  wlsunset has no IPC (only `SIGUSR1`, which cycles modes that cannot be read back), and
+  niri resets the gamma as soon as it disconnects, so stopping it is turning the night
+  light off. The state is the unit's `ActiveState` (on while active, activating or
+  reloading), followed through `PropertiesChanged` (the shell calls the manager's
+  `Subscribe`, without which systemd sends none), so a `systemctl --user stop` shows
+  too. The unit is loaded by name (`LoadUnit`): one `not-found` hides the item.
+- **Keep awake** (`keep_awake.rs`) holds a logind inhibitor while on:
+  `Inhibit("idle", "rust-wl-shell", "Keep awake", "block")`, released by closing its
+  fd. Idle only: the lid, the power key and an asked-for lock still act. It is off at
+  every start; a refused inhibitor is logged and leaves it off. What honours it:
+  rust-wl-idle-manager (logind's `BlockInhibited`) and logind's own `IdleAction`. niri's
+  ext-idle-notify does not: niri 26.04 does not read logind's inhibitors (its source
+  has no `BlockInhibited`), so an idle client of niri's alone (swayidle) does not wait.
+
 ## The backlight
 
 `backlight.rs` reads `/sys/class/backlight/<device>` (the config's `backlight`, a name,
@@ -300,6 +320,12 @@ one:
   a choice makes that output play. With no outputs the section is hidden.
 - the brightness: `display-brightness-symbolic`, hidden with no backlight; the popover
   has a slider.
+- the night light and keep awake (`toggles.rs`): click toggles with no popover, flat
+  buttons as the items, filled with the accent while on (`night-light-symbolic`, the
+  theme's moon; keep awake's cup is the shell's own `rust-wl-shell-keep-awake-symbolic`,
+  installed with it and added to the icon theme's search path at start, as Adwaita has
+  no cup); "Night light: on", "Keep awake: off" for screen readers. A click asks for the
+  other state, shown once the core says so; hidden until it does.
 - the network: the primary connection's icon (`network-wireless-signal-*-symbolic`
   in four levels, `network-wired-symbolic`, `network-wireless-acquiring-symbolic`, or
   offline); hidden without NM. Its popover, as macOS's: a "Wi-Fi" title with a switch,
@@ -472,7 +498,8 @@ run on the system bus. The test checks:
 
 1. the module's settings, chosen unlike the defaults (`height 28`, `clock-format
    "%H:%M %d/%m"`), pass `--check`; the shell logs its marks and `blur on`; the unit
-   sets neither `GDK_DEBUG` nor `GSK_RENDERER`
+   sets neither `GDK_DEBUG` nor `GSK_RENDERER`; with no wlsunset unit in the VM, there is no
+   night light item
 2. the bar is 28 px high from the top edge, and tints the grey under it
 3. a click on a workspace dot switches workspace (read back from `niri msg`)
 4. the app name follows focus: a desktop file's Name, else the app id; on an empty
@@ -552,6 +579,14 @@ is typed with the VM's keyboard, into whatever has the focus. It checks:
     and disconnects one (the fake's state, the item's name), and the switch turns the
     adapter off
 12. none of the passwords typed is in the system's or alice's journal
+13. the night light, with a stand-in `wlsunset.service` (a sleep), started with the
+    session: the item is on and filled with the accent (pixels); a click stops the unit
+    (`systemctl --user is-active`) and empties the item, another starts it; stopped
+    with `systemctl --user stop`, the item follows
+14. keep awake: off at start; on, `systemd-inhibit --list` has its line (idle, "Keep
+    awake", block) and logind's idle action (`IdleAction=lock` after 5 s, alice's
+    session's idle hint set) does not come in 10 s; off, it comes ("System idle" in
+    logind's journal) and the inhibitor is gone
 
 In the bar's test, items and popover rows are found by their pixels (white on the tint, apart by gaps),
 not by AT-SPI's extents, which in this VM are off by about 17 px from where GTK lays

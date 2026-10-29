@@ -55,7 +55,8 @@ window.bar .right {
   border-spacing: calc(var(--spacing) / 2);
 }
 
-window.bar menubutton.item > button {
+window.bar menubutton.item > button,
+window.bar button.toggle {
   all: unset;
   padding: 0 calc(var(--spacing) * 3 / 4);
   margin: 2px 0;
@@ -63,8 +64,15 @@ window.bar menubutton.item > button {
 }
 
 window.bar menubutton.item > button:hover,
-window.bar menubutton.item > button:checked {
+window.bar menubutton.item > button:checked,
+window.bar button.toggle:hover {
   background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* A toggle that is on (the night light, keep awake), filled with the accent. */
+window.bar button.toggle.on {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
 }
 
 /* A popover: frosted as the bar, rounded, with a thin outline; its arrow alike. */

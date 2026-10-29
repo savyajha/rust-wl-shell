@@ -13,6 +13,7 @@ mod osd;
 mod popover;
 mod shell;
 mod sliders;
+mod toggles;
 
 use std::env;
 use std::ffi::OsString;
@@ -97,6 +98,10 @@ fn run(marks: Marks, path: Option<PathBuf>) -> anyhow::Result<()> {
         &css,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+    // The shell's own icons (keep awake's cup), installed by Nix, else in the source tree.
+    let icons = option_env!("RUST_WL_SHELL_ICONS");
+    let icons = icons.unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/icons"));
+    gtk::IconTheme::for_display(&display).add_search_path(icons);
 
     let core = shell_core::start(&config);
     let main_loop = glib::MainLoop::new(None, false);

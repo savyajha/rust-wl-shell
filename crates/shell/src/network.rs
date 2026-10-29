@@ -99,22 +99,18 @@ impl NetworkItem {
         // within its icon's level), so that a row is not replaced under the pointer.
         let before = before.as_ref().map(lists);
         let now = lists(network);
-        let current = network.networks.iter().find(|n| n.current);
-        let (icon, label) = match (network.primary, current) {
-            (Primary::Wired, _) => ("network-wired-symbolic", "Network: wired".into()),
-            (Primary::Wifi(strength), Some(n)) => {
-                (signal_icon(strength), format!("Wi-Fi: {}", n.ssid))
-            }
-            (Primary::Wifi(strength), None) => (signal_icon(strength), "Wi-Fi".into()),
-            (Primary::Connecting, _) => (
+        let (icon, label) = match &network.primary {
+            Primary::Wired => ("network-wired-symbolic", "Network: wired".into()),
+            Primary::Wifi(strength, ssid) => (signal_icon(*strength), format!("Wi-Fi: {ssid}")),
+            Primary::Connecting => (
                 "network-wireless-acquiring-symbolic",
                 "Network: connecting".into(),
             ),
-            (Primary::Offline, _) if network.wifi_present => (
+            Primary::Offline if network.wifi_present => (
                 "network-wireless-offline-symbolic",
                 "Network: offline".into(),
             ),
-            (Primary::Offline, _) => ("network-offline-symbolic", "Network: offline".into()),
+            Primary::Offline => ("network-offline-symbolic", "Network: offline".into()),
         };
         self.icon.set_icon_name(Some(icon));
         self.item

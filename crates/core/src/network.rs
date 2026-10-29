@@ -42,11 +42,12 @@ pub struct Network {
 }
 
 /// What the bar's icon shows.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Primary {
     Wired,
-    /// Its signal, 0 to 100.
-    Wifi(u8),
+    /// Its signal, 0 to 100, and its SSID (from the active connection: its access point
+    /// may be missing from the last scan's).
+    Wifi(u8, String),
     Connecting,
     Offline,
 }
@@ -205,7 +206,10 @@ async fn read(nm: &NetworkManager) -> nmrs::Result<Network> {
     let active = nm.list_active_connections().await?;
     let active = active.iter().filter_map(|a| {
         let (uuid, kind, state) = match a {
-            ActiveConnection::Wifi(w) => (&w.uuid, Kind::Wifi(w.strength.unwrap_or(0)), &w.state),
+            ActiveConnection::Wifi(w) => {
+                let kind = Kind::Wifi(w.strength.unwrap_or(0), w.ssid.clone());
+                (&w.uuid, kind, &w.state)
+            }
             ActiveConnection::Wired(w) => (&w.uuid, Kind::Wired(w.id.clone()), &w.state),
             ActiveConnection::Vpn(v) => (&v.uuid, Kind::Vpn, &v.state),
             _ => return None,
@@ -243,8 +247,8 @@ struct Active {
 }
 
 enum Kind {
-    /// Its signal.
-    Wifi(u8),
+    /// Its signal and SSID.
+    Wifi(u8, String),
     /// Its name.
     Wired(String),
     Vpn,
@@ -265,7 +269,7 @@ fn network(
         })
     };
     let is_active = |uuid: &Option<String>| {
-        let wifi = |a: &&Active| matches!(a.kind, Kind::Wifi(_));
+        let wifi = |a: &&Active| matches!(a.kind, Kind::Wifi(..));
         active
             .iter()
             .filter(wifi)
@@ -294,11 +298,11 @@ fn network(
     let primary = if activated(|k| matches!(k, Kind::Wired(_))).is_some() {
         Primary::Wired
     } else if let Some(Active {
-        kind: Kind::Wifi(strength),
+        kind: Kind::Wifi(strength, ssid),
         ..
-    }) = activated(|k| matches!(k, Kind::Wifi(_)))
+    }) = activated(|k| matches!(k, Kind::Wifi(..)))
     {
-        Primary::Wifi(*strength)
+        Primary::Wifi(*strength, ssid.clone())
     } else if active.iter().any(|a| !a.on && !matches!(a.kind, Kind::Vpn)) {
         Primary::Connecting
     } else {
@@ -437,7 +441,7 @@ mod tests {
             ap("Library", 50, Security::Open),
         ];
         let saved = vec![wifi("h", "Home"), wifi("o", "Office"), wifi("x", "Away")];
-        let active = vec![active("h", Kind::Wifi(60), true)];
+        let active = vec![active("h", Kind::Wifi(60, "Home".into()), true)];
         let network = network((true, true), aps, saved, active);
         let want = [
             ("Home", 60, true, true),
@@ -447,7 +451,7 @@ mod tests {
             ("Library", 50, false, false),
         ];
         assert_eq!(listed(&network), want);
-        assert_eq!(network.primary, Primary::Wifi(60));
+        assert_eq!(network.primary, Primary::Wifi(60, "Home".into()));
         assert_eq!(network.networks[0].known.as_deref(), Some("h"));
         assert_eq!(network.networks[2].security, Security::Wpa3);
     }
@@ -456,10 +460,13 @@ mod tests {
     fn the_primary_connection() {
         let primary = |active: Vec<Active>| network((true, true), vec![], vec![], active).primary;
         let wired = || active("w", Kind::Wired("Ethernet".into()), true);
-        let wifi = |on| active("h", Kind::Wifi(70), on);
+        let wifi = |on| active("h", Kind::Wifi(70, "Home".into()), on);
         let vpn = |on| active("v", Kind::Vpn, on);
         assert_eq!(primary(vec![wifi(true), wired()]), Primary::Wired);
-        assert_eq!(primary(vec![wifi(true), vpn(true)]), Primary::Wifi(70));
+        assert_eq!(
+            primary(vec![wifi(true), vpn(true)]),
+            Primary::Wifi(70, "Home".into())
+        );
         assert_eq!(primary(vec![wifi(false)]), Primary::Connecting);
         // A VPN connecting is not the network connecting.
         assert_eq!(primary(vec![vpn(false)]), Primary::Offline);

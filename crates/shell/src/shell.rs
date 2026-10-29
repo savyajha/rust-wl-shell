@@ -27,6 +27,8 @@ struct Shell {
     brightness: UnboundedSender<u8>,
     network: UnboundedSender<network::Request>,
     bluetooth: UnboundedSender<bluetooth::Request>,
+    night_light: UnboundedSender<bool>,
+    keep_awake: UnboundedSender<bool>,
     dialog: Rc<Dialog>,
     osd: Option<Osd>,
     blur: Option<Rc<Blur>>,
@@ -55,6 +57,8 @@ pub fn start(
         network,
         answers,
         bluetooth,
+        night_light,
+        keep_awake,
     } = core;
     let blur = Blur::new(display).map(Rc::new);
     let shell = Rc::new(RefCell::new(Shell {
@@ -65,6 +69,8 @@ pub fn start(
         dialog: Dialog::new(network.clone(), answers, &blur),
         network,
         bluetooth,
+        night_light,
+        keep_awake,
         osd: config.osd.then(|| Osd::new(&blur)),
         config: Rc::new(config),
         blur,
@@ -121,6 +127,8 @@ impl Shell {
                 brightness: self.brightness.clone(),
                 network: self.network.clone(),
                 bluetooth: self.bluetooth.clone(),
+                night_light: self.night_light.clone(),
+                keep_awake: self.keep_awake.clone(),
                 dialog: self.dialog.clone(),
                 blur: self.blur.clone(),
             })

@@ -72,13 +72,17 @@ backlight "amdgpu_bl1"
 | `vpn` | `true` | Show NetworkManager's VPN and WireGuard connections, when there are any. |
 | `secret-agent` | `true` | Be NetworkManager's secret agent, answering its own requests for passwords in the dialog; off, another agent (a panel's) answers them, and the network items stay. |
 | `bluetooth` | `true` | Show Bluetooth (BlueZ's), when there is an adapter. |
+| `night-light` | `true` | Show the night light toggle, when its unit exists. |
+| `night-light-unit` | `"wlsunset.service"` | The user unit the night light starts and stops (wlsunset, as home-manager's `services.wlsunset` runs it). |
+| `keep-awake` | `true` | Show the keep awake toggle: while on, a logind idle inhibitor. |
 | `backlight` | the first | The backlight device to follow, by its name in `/sys/class/backlight`. |
 
 The four sizes follow the height unless set, in macOS's proportions at 24 px; each must be
 at most the height. The clock is redrawn on each minute and after a resume from sleep.
 
 The items on the right, right to left after the clock: the battery, the network,
-Bluetooth, VPN, the volume, the brightness, the keyboard layout. Each is a symbolic icon
+Bluetooth, VPN, the volume, keep awake, the night light, the brightness, the keyboard
+layout. Each is a symbolic icon
 from the icon theme (the layout is its short name, as GNOME has it, in upper case: "EN",
 "DE") and opens a popover under it: the battery's percentage, state and time left, and
 the power modes to choose from; the Wi-Fi switch, the known networks in range and the
@@ -86,7 +90,13 @@ others; Bluetooth's switch and the paired devices, to connect or disconnect (pai
 left to Settings); the VPN connections, to switch on or off; the volume's slider (its
 speaker mutes) and the outputs (each sound card's available ports) to choose from; the
 brightness's slider; the layouts to choose from. A click outside or Escape closes it.
-The brightness is set through logind, which needs no permission.
+The brightness is set through logind, which needs no permission. The night light and
+keep awake are click toggles with no popover, filled with the accent while on. The night
+light starts and stops a user unit (wlsunset by default), whose state it shows, so
+`systemctl --user stop wlsunset` turns it off too; off stays off until it is turned on
+or the next login. Keep awake holds a logind inhibitor of idle, so that the idle lock,
+the screens going off and suspend on idle wait (the lid, the power key and a lock asked
+for still work); it is off whenever the shell starts.
 
 A secured network asks for its password in a dialog in the middle of the focused output
 (an enterprise network for a username too, and in "Options" its method and the domain

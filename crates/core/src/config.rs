@@ -62,6 +62,14 @@ pub struct Config {
     pub secret_agent: bool,
     #[knuffel(child, unwrap(argument), default = true)]
     pub bluetooth: bool,
+    /// The night light: switching the user unit `night-light-unit` on and off.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub night_light: bool,
+    #[knuffel(child, unwrap(argument), default = "wlsunset.service".into())]
+    pub night_light_unit: String,
+    /// Keeping the machine awake: holding an idle inhibitor.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub keep_awake: bool,
     /// The backlight device (in /sys/class/backlight), else the first.
     #[knuffel(child, unwrap(argument))]
     pub backlight: Option<String>,
@@ -218,6 +226,9 @@ mod tests {
             vpn false
             secret-agent false
             bluetooth false
+            night-light false
+            night-light-unit "gammastep.service"
+            keep-awake false
             backlight "amdgpu_bl1"
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
@@ -244,6 +255,9 @@ mod tests {
                 vpn: false,
                 secret_agent: false,
                 bluetooth: false,
+                night_light: false,
+                night_light_unit: "gammastep.service".into(),
+                keep_awake: false,
                 backlight: Some("amdgpu_bl1".into()),
             }
         );
