@@ -257,7 +257,10 @@ never built.
 `popover.rs` is the component every item is built on: a `GtkMenuButton` (flat, with the
 greeter's chip plate while hovered or open) whose `GtkPopover` GTK places under it,
 with GTK's arrow pointing at the button (styled as the contents: the same tint and
-outline), closes on an outside click (so one is open at a time) and on Escape. The bar takes no
+outline; GTK 4.22 draws the arrow after the contents, over the contents' border on
+its side, which only an opaque fill hides, so that side of the contents has no border,
+by the bar's `top` or `bottom` class, and the arrow's own sides outline it), closes on an
+outside click (so one is open at a time) and on Escape. The bar takes no
 keyboard, so that clicks on it leave the focus with the window; while a popover is open
 the bar's layer surface asks for the keyboard `OnDemand`, so that Escape reaches it,
 and gives it back (`None`) when the popover closes. `OnDemand` rather than `Exclusive`:
@@ -508,6 +511,9 @@ run on the system bus. The test checks:
 15. a popover's arrow, over a striped background (swaybg): drawn between the item and the
     contents (tinted), blurred within (the stripes smoothed near its base), and the
     strips beside it exactly the background (no tint, no blur)
+16. from a bottom bar (a second shell with `position "bottom"`), the popover opens upward
+    and its arrow's middle column, from above its tip into the contents, is one tint:
+    no line across its base
 
 The network's VM test (`tests/network.nix`, in the same session, `tests/session.nix`)
 has real Wi-Fi: four `mac80211_hwsim` radios, NetworkManager on its iwd backend for

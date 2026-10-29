@@ -109,10 +109,12 @@ impl Component for Bar {
         root.set_layer(Layer::Top);
         root.set_keyboard_mode(KeyboardMode::None);
         root.set_monitor(Some(&init.monitor));
-        let edge = match init.config.position {
-            Position::Top => Edge::Top,
-            Position::Bottom => Edge::Bottom,
+        // Its edge as a class too, for its popovers' style.
+        let (edge, class) = match init.config.position {
+            Position::Top => (Edge::Top, "top"),
+            Position::Bottom => (Edge::Bottom, "bottom"),
         };
+        root.add_css_class(class);
         for edge in [edge, Edge::Left, Edge::Right] {
             root.set_anchor(edge, true);
         }

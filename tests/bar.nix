@@ -34,7 +34,8 @@
 #      no OSD; an outside mute shows the OSD; the server restarted, the item comes back.
 #      No backlight in the VM: no brightness item.
 #  13. the OSD shows on the focused output; with that output switched off, on another
-#  14. a popover's arrow points at its item: drawn, blurred within, and not beside it
+#  14. a popover's arrow points at its item: drawn, blurred within, and not beside it;
+#      from a bottom bar (a second shell), no line across its base
 
 {
   pkgs,
@@ -431,6 +432,50 @@ pkgs.testers.runNixOSTest {
         assert spread(before) > 300 and spread(after) < spread(before) // 3, (
             spread(before), spread(after))
         machine.succeed("pkill swaybg")
+
+    with subtest("from a bottom bar, the arrow joins its popover with no line at its base"):
+        # A second shell, its bar at the bottom of each output (niri's grey under it).
+        machine.succeed("echo 'position \"bottom\"' > /tmp/bottom.kdl")
+        machine.succeed(
+            PREFIX + "sh -c 'WAYLAND_DISPLAY=$(basename $(ls ${runtimeDir}/wayland-?)) "
+            + "NIRI_SOCKET=$(ls ${runtimeDir}/niri*.sock) "
+            + "/etc/profiles/per-user/${user}/bin/rust-wl-shell --config /tmp/bottom.kdl "
+            + ">/tmp/bottom.log 2>&1 &'"
+        )
+        top = 768 - HEIGHT
+        def bottom_items():
+            move(512, 400)
+            time.sleep(0.5)
+            shot = screen()
+            bright = [
+                x for x in range(1023, 600, -1)
+                if any(min(pixel(shot, x, y)) > 180 for y in range(top + 4, 768 - 4))
+            ]
+            return bright
+        retry(lambda _: len(bottom_items()) > 20, 30)
+        # The clock's first white, then the item before it: the first white after a gap.
+        bright = bottom_items()
+        gap = next(i for i in range(1, len(bright)) if bright[i - 1] - bright[i] >= 10)
+        last = bright[gap]
+        first = next(
+            (bright[i - 1] for i in range(gap + 1, len(bright)) if bright[i - 1] - bright[i] >= 10),
+            bright[-1],
+        )
+        x = (first + last) // 2
+        click(x, top + HEIGHT // 2)
+        time.sleep(1)
+        move(100, 300)
+        time.sleep(0.5)
+        shot = screen()
+        machine.send_monitor_command(f"screendump {machine.out_dir}/arrow-bottom.ppm gpu 0")
+        # Up the arrow's middle, from just above its tip (2 px above the bar) through its
+        # base into the contents: one tint all the way, no line.
+        column = [pixel(shot, x, y) for y in range(top - 24, top - 4)]
+        print(column)
+        assert all(not is_grey(p) for p in column), column
+        assert max(max(p) for p in column) - min(min(p) for p in column) <= 6, column
+        machine.send_key("esc")
+        machine.succeed("pkill -f bottom.kdl")
 
     with subtest("niri's IPC closing ends the shell"):
         machine.succeed(f"{PREFIX} ${fakeNiri} ${runtimeDir}/fake-niri.sock >/dev/null 2>&1 &")

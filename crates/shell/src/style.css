@@ -73,6 +73,17 @@ popover.item-popover > arrow {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+/* GTK draws the arrow over the contents' border on its side, which an opaque fill would
+   hide; a translucent one shows it as a line across the arrow's base. So that side has no
+   border: the arrow's own sides outline it. */
+window.bar.top popover.item-popover > contents {
+  border-top-width: 0;
+}
+
+window.bar.bottom popover.item-popover > contents {
+  border-bottom-width: 0;
+}
+
 popover.item-popover > contents {
   background-color: rgba(0, 0, 0, 0.35);
   color: white;
