@@ -185,6 +185,119 @@ in
     GLib.MainLoop().run()
   '';
 
+  # logind, as much of its manager as the power menu uses, on the bus at the address in
+  # $FAKE_BUS (a private system bus: the VM's own logind is never asked). Its answers and
+  # inhibitors come from /run/fake-logind/{can,inhibitors}.json; the calls it gets are
+  # written to /run/fake-logind/calls; with /run/fake-logind/refuse, it refuses them. On
+  # SIGUSR1 it sends PrepareForSleep(true), then (false) a second later; on SIGUSR2 the session is locked (LockedHint).
+  logind = python "fake-logind" ''
+    import json
+    import os
+    import signal
+    ${common}
+    MANAGER = "org.freedesktop.login1.Manager"
+    DIR = "/run/fake-logind/"
+    bus = dbus.bus.BusConnection(os.environ["FAKE_BUS"])
+
+
+    def read(name, default):
+        try:
+            with open(DIR + name) as f:
+                return json.load(f)
+        except OSError:
+            return default
+
+
+    def called(*what):
+        if os.path.exists(DIR + "refuse"):
+            raise dbus.exceptions.DBusException(
+                "Operation inhibited by Firefox: Downloading",
+                name="org.freedesktop.login1.OperationInProgress",
+            )
+        with open(DIR + "calls", "a") as f:
+            f.write(" ".join(str(w) for w in what) + "\n")
+
+
+    class Manager(dbus.service.Object):
+        def can(self, name):
+            return read("can.json", {}).get(name, "yes")
+
+        @dbus.service.method(MANAGER, out_signature="s")
+        def CanSuspend(self):
+            return self.can("CanSuspend")
+
+        @dbus.service.method(MANAGER, out_signature="s")
+        def CanReboot(self):
+            return self.can("CanReboot")
+
+        @dbus.service.method(MANAGER, out_signature="s")
+        def CanPowerOff(self):
+            return self.can("CanPowerOff")
+
+        @dbus.service.method(MANAGER, in_signature="b")
+        def Suspend(self, interactive):
+            called("Suspend", bool(interactive))
+
+        @dbus.service.method(MANAGER, in_signature="b")
+        def Reboot(self, interactive):
+            called("Reboot", bool(interactive))
+
+        @dbus.service.method(MANAGER, in_signature="b")
+        def PowerOff(self, interactive):
+            called("PowerOff", bool(interactive))
+
+        @dbus.service.method(MANAGER, in_signature="s")
+        def LockSession(self, session):
+            called("LockSession", session)
+
+        @dbus.service.method(MANAGER, in_signature="u", out_signature="o")
+        def GetUser(self, uid):
+            return "/org/freedesktop/login1/user/_%d" % uid
+
+        @dbus.service.method(MANAGER, out_signature="a(ssssuu)")
+        def ListInhibitors(self):
+            return [tuple(i) for i in read("inhibitors.json", [])]
+
+        @dbus.service.signal(MANAGER, signature="b")
+        def PrepareForSleep(self, start):
+            pass
+
+
+    name = dbus.service.BusName("org.freedesktop.login1", bus)
+    manager = Manager(bus, "/org/freedesktop/login1")
+    display = dbus.Struct(
+        (dbus.String("c1"), dbus.ObjectPath("/org/freedesktop/login1/session/c1")),
+        signature="so",
+    )
+    user = Object(
+        bus,
+        "/org/freedesktop/login1/user/_1000",
+        "org.freedesktop.login1.User",
+        {"Display": display},
+    )
+    session = Object(
+        bus,
+        "/org/freedesktop/login1/session/c1",
+        "org.freedesktop.login1.Session",
+        {"LockedHint": dbus.Boolean(False)},
+    )
+
+
+    def sleep():
+        # Asleep, and awake again a second later.
+        manager.PrepareForSleep(True)
+        GLib.timeout_add_seconds(1, lambda: manager.PrepareForSleep(False))
+        return True
+
+
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, sleep)
+    GLib.unix_signal_add(
+        GLib.PRIORITY_DEFAULT, signal.SIGUSR2,
+        session.change, {"LockedHint": dbus.Boolean(True)},
+    )
+    GLib.MainLoop().run()
+  '';
+
   policy = pkgs.writeTextDir "share/dbus-1/system.d/fake-services.conf" ''
     <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
       "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">

@@ -99,6 +99,7 @@ pkgs.testers.runNixOSTest {
         # Off, so the items' places stay as the test counts them; the night light is on,
         # but hidden: the VM has no wlsunset unit.
         keep-awake = false;
+        power = false;
       })
     ];
     environment.systemPackages = [
@@ -453,7 +454,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("from a bottom bar, the arrow joins its popover with no line at its base"):
         # A second shell, its bar at the bottom of each output (niri's grey under it).
-        machine.succeed("echo 'position \"bottom\"' > /tmp/bottom.kdl")
+        machine.succeed("printf 'position \"bottom\"\\npower false\\n' > /tmp/bottom.kdl")
         machine.succeed(
             PREFIX + "sh -c 'WAYLAND_DISPLAY=$(basename $(ls ${runtimeDir}/wayland-?)) "
             + "NIRI_SOCKET=$(ls ${runtimeDir}/niri*.sock) "

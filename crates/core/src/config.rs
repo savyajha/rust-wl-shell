@@ -77,6 +77,12 @@ pub struct Config {
     /// critical ones stay until dismissed.
     #[knuffel(child, unwrap(argument), default = 10)]
     pub notification_max_timeout: u32,
+    /// The power menu, after the clock.
+    #[knuffel(child, unwrap(argument), default = true)]
+    pub power: bool,
+    /// The seconds a restart, shut down or log out waits in its dialog before it acts.
+    #[knuffel(child, unwrap(argument), default = 60)]
+    pub power_countdown: u32,
     /// Keeping the machine awake: holding an idle inhibitor.
     #[knuffel(child, unwrap(argument), default = true)]
     pub keep_awake: bool,
@@ -253,6 +259,8 @@ mod tests {
             notifications false
             notification-position "bottom-left"
             notification-max-timeout 20
+            power false
+            power-countdown 5
             backlight "amdgpu_bl1"
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
@@ -285,6 +293,8 @@ mod tests {
                 notifications: false,
                 notification_position: Corner::BottomLeft,
                 notification_max_timeout: 20,
+                power: false,
+                power_countdown: 5,
                 backlight: Some("amdgpu_bl1".into()),
             }
         );

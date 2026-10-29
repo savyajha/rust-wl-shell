@@ -14,6 +14,7 @@ pub mod network;
 pub mod night_light;
 pub mod niri;
 pub mod notifications;
+pub mod power;
 pub mod power_profiles;
 pub mod upower;
 pub mod xkb;
@@ -53,6 +54,14 @@ pub enum Update {
     /// Whether the idle inhibitor is held.
     KeepAwake(bool),
     Notifications(notifications::Notifications),
+    /// What logind offers; `None`: no logind.
+    Power(Option<power::Power>),
+    /// An action to ask about, and its block inhibitors, as "app: reason".
+    Asked(power::Action, Vec<String>),
+    /// A sleep starts, or the session locks: what the dialog asks is called off.
+    Interrupted,
+    /// An action done, or logind's error.
+    Acted(power::Action, Option<String>),
 }
 
 /// The core's side of the channels.
@@ -73,6 +82,7 @@ pub struct Core {
     /// Whether to keep awake.
     pub keep_awake: UnboundedSender<bool>,
     pub notifications: UnboundedSender<notifications::Request>,
+    pub power: UnboundedSender<power::Request>,
 }
 
 /// Start the core's thread, and the audio's, with the services the config's items need
@@ -84,6 +94,7 @@ pub fn start(config: &config::Config) -> Core {
     let bluetooth_on = config.bluetooth;
     let night_light_unit = config.night_light.then(|| config.night_light_unit.clone());
     let keep_awake_on = config.keep_awake;
+    let power_on = config.power;
     let notifications_cap = config
         .notifications
         .then(|| Duration::from_secs(config.notification_max_timeout.into()));
@@ -97,6 +108,8 @@ pub fn start(config: &config::Config) -> Core {
     let (night_light, night_light_rx) = mpsc::unbounded_channel();
     let (keep_awake, keep_awake_rx) = mpsc::unbounded_channel();
     let (notifications, notifications_rx) = mpsc::unbounded_channel();
+    let (power, power_rx) = mpsc::unbounded_channel();
+    let niri_commands = niri.clone();
     let audio = audio::start(update_tx.downgrade());
     thread::Builder::new()
         .name("core".into())
@@ -128,6 +141,12 @@ pub fn start(config: &config::Config) -> Core {
                     let followed =
                         backlight::run(backlight, bus.clone(), updates.clone(), brightness_rx);
                     tokio::spawn(followed);
+                    // Logging out takes no system bus.
+                    if power_on {
+                        let served =
+                            power::run(bus.clone(), updates.clone(), niri_commands, power_rx);
+                        tokio::spawn(served);
+                    }
                     let Some(bus) = bus else {
                         return;
                     };
@@ -161,5 +180,6 @@ pub fn start(config: &config::Config) -> Core {
         night_light,
         keep_awake,
         notifications,
+        power,
     }
 }

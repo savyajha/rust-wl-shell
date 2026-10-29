@@ -54,6 +54,12 @@
             homeManager = home-manager.nixosModules.home-manager;
             module = self.homeManagerModules.default;
           };
+          # The power menu, against a fake logind.
+          power = import ./tests/power.nix {
+            inherit pkgs;
+            homeManager = home-manager.nixosModules.home-manager;
+            module = self.homeManagerModules.default;
+          };
           # The notification server, its banners and the history.
           notifications = import ./tests/notifications.nix {
             inherit pkgs;

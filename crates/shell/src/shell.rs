@@ -8,7 +8,7 @@ use gio_unix::DesktopAppInfo;
 use gtk4::{gdk, gio, glib, prelude::*};
 use relm4::{Component, ComponentController, Controller};
 use shell_core::config::Config;
-use shell_core::{Core, Update, audio, bluetooth, network, niri, notifications};
+use shell_core::{Core, Update, audio, bluetooth, network, niri, notifications, power};
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 
@@ -31,6 +31,7 @@ struct Shell {
     night_light: UnboundedSender<bool>,
     keep_awake: UnboundedSender<bool>,
     notifications: UnboundedSender<notifications::Request>,
+    power: UnboundedSender<power::Request>,
     banners: Rc<RefCell<Banners>>,
     dialog: Rc<Dialog>,
     osd: Option<Osd>,
@@ -63,6 +64,7 @@ pub fn start(
         night_light,
         keep_awake,
         notifications,
+        power,
     } = core;
     let blur = Blur::new(display).map(Rc::new);
     let shell = Rc::new(RefCell::new(Shell {
@@ -70,7 +72,7 @@ pub fn start(
         profiles,
         audio,
         brightness,
-        dialog: Dialog::new(network.clone(), answers, &blur),
+        dialog: Dialog::new(network.clone(), answers, power.clone(), &blur),
         network,
         bluetooth,
         night_light,
@@ -81,6 +83,7 @@ pub fn start(
             blur.clone(),
         ))),
         notifications,
+        power,
         osd: config.osd.then(|| Osd::new(&blur)),
         config: Rc::new(config),
         blur,
@@ -140,6 +143,7 @@ impl Shell {
                 night_light: self.night_light.clone(),
                 keep_awake: self.keep_awake.clone(),
                 notifications: self.notifications.clone(),
+                power: self.power.clone(),
                 banners: self.banners.clone(),
                 dialog: self.dialog.clone(),
                 blur: self.blur.clone(),
@@ -160,6 +164,12 @@ impl Shell {
             Update::Joined(joined) => return self.dialog.joined(&joined),
             Update::Prompt(prompt) => return self.dialog.ask(prompt),
             Update::PromptClosed(id) => return self.dialog.closed(id),
+            Update::Asked(action, blockers) => {
+                let seconds = self.config.power_countdown;
+                return self.dialog.ask_power(action, seconds, blockers);
+            }
+            Update::Acted(action, error) => return self.dialog.acted(action, error),
+            Update::Interrupted => return self.dialog.interrupted(),
             _ => {}
         }
         if let Update::Notifications(state) = &update {

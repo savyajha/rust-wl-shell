@@ -35,6 +35,8 @@ pub enum Command {
     FocusWorkspace(u64),
     /// The layout at this index in `Snapshot::layouts`.
     SwitchLayout(u8),
+    /// niri quits, so the session ends.
+    Quit,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +119,9 @@ pub async fn run(
                     },
                     Command::SwitchLayout(index) => Action::SwitchLayout {
                         layout: LayoutSwitchTarget::Index(index),
+                    },
+                    Command::Quit => Action::Quit {
+                        skip_confirmation: true,
                     },
                 };
                 if let Err(e) = perform(&socket, action).await {

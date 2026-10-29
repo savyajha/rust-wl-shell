@@ -306,6 +306,40 @@ In the UI (`notifications.rs`, `clock.rs`):
   default action while it still has one; "No notifications" when empty. It scrolls
   past 480 px.
 
+## The power menu
+
+`power.rs` (core): through logind's manager on the system bus, the menu's answers
+(`CanSuspend`, `CanReboot`, `CanPowerOff`; `yes` or `challenge` shows the entry, read at
+start) and its actions, each `interactive` so that polkit may ask: Lock Screen is
+`LockSession` for the user's graphical session (`GetUser` for the shell's uid, then its
+`Display`, else the first of its `Sessions`: the shell is a user unit, outside any
+session), Sleep `Suspend`, Restart
+`Reboot`, Shut Down `PowerOff`. Log Out is niri's `Quit` (`skip_confirmation`) on its IPC
+socket: the session ends with niri. Each action's outcome comes back as `Acted`, with
+logind's error if it refused. Before a restart or a shut down (or sleep), `Blockers` lists
+logind's **block** inhibitors for it (`shutdown`, `sleep`; a mode starting with
+`block`), as "app: reason"; delay ones are left out, as logind waits for them anyway.
+Without logind, or without a system bus, only Log Out is offered. The core follows
+logind's `PrepareForSleep` and the session's `LockedHint`: a sleep starting, or the
+session locked, sends `Interrupted`, which calls off a power dialog.
+
+In the UI (`power.rs`), the item is the theme's `system-shutdown-symbolic`, the rightmost
+in the bar; its popover's rows act at once (Lock Screen, Sleep) or open the dialog
+(Restart…, Shut Down…, Log Out…), once the core has their blockers (`Asked`). The dialog
+(`Dialog::ask_power`, the Wi-Fi password's) shows "Restart?" and "Your computer will restart in 60 seconds." counting down each second
+(`power-countdown`), the blockers under it, then Cancel and the action's button (the
+accent's, the default; Enter takes it, Escape cancels). At 0, or on the button, the
+action is asked for, and the dialog is hidden (and gives the keyboard back) while it
+runs, so that polkit's prompt, if it asks, is not under it; it closes when it is done,
+or is shown again with logind's refusal in its error line. A refused Lock or Sleep,
+asked without a dialog, gets one to say so.
+
+The countdown never acts unseen: it stops when the dialog leaves the screen (unmapped:
+its output unplugged), when a sleep starts, and when the session locks. Known
+behaviours: a Wi-Fi password prompt from NetworkManager's agent arriving during the
+countdown takes the dialog, which calls the power action off; Escape after the action's
+button (the request sent, the dialog hidden) does not undo it, as logind has it.
+
 ## The backlight
 
 `backlight.rs` reads `/sys/class/backlight/<device>` (the config's `backlight`, a name,
@@ -555,6 +589,7 @@ Unit tests (`cargo test`):
 - the arguments.
 - UPower's and power-profiles-daemon's properties to their snapshots; the keyboard
   layouts from niri's events; the items' icon names, short layout names and times.
+- the power menu's block inhibitors for each action (delay ones left out).
 - the notifications' store: the timeouts (default, "never" capped, critical, a
   critical one with a timeout); images GTK can take, and malformed ones; links' tags
   taken out, texts cut on a boundary; closed when gone from both (transient under Do
@@ -694,6 +729,24 @@ scrolls sideways with ydotool's uinput mouse (QEMU's tablet sends no horizontal 
 8. Do Not Disturb: no banner, but for a critical one, the history still filling; a
    transient one (`notify-send --wait -e`) returns at once, its close after its id; after
    a restart of the shell's unit the history and Do Not Disturb are still there
+
+The power menu's VM test (`tests/power.nix`, in the same session) gives the shell a
+private system bus (its unit's `DBUS_SYSTEM_BUS_ADDRESS`) with a fake logind on it
+(`tests/fake-services.nix`), whose answers and inhibitors come from files and which
+writes down the calls it gets: the VM's own logind is never asked to power off. The other
+system services are off there. `power-countdown` is 3. It checks:
+
+1. the entries follow the answers: "no" leaves Shut Down out, "challenge" shows Restart
+2. Lock Screen sends `LockSession` for the user's display session; Sleep `Suspend(true)`
+3. Restart… opens the dialog, which lists the block inhibitor (not the delay one), and
+   `Reboot(true)` comes at 0, the dialog closing
+4. Shut Down…: Cancel, and Escape, then nothing; refused, logind's error shows in the
+   dialog, still open; its button sends `PowerOff(true)` at once
+5. the keyboard is back with the window after the popover and the dialog
+6. a countdown is called off, nothing reaching logind, when its output is switched off
+   under it, when the fake sends `PrepareForSleep(true)`, and when its session's
+   `LockedHint` turns true
+7. Log Out… ends niri (its process gone)
 
 In the bar's test, items and popover rows are found by their pixels (white on the tint, apart by gaps),
 not by AT-SPI's extents, which in this VM are off by about 17 px from where GTK lays

@@ -10,7 +10,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::{Component, ComponentParts, ComponentSender};
 use shell_core::config::{Config, Position};
 use shell_core::niri::{self, Workspace};
-use shell_core::{Update, audio, bluetooth, network, notifications};
+use shell_core::{Update, audio, bluetooth, network, notifications, power};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::bluetooth::BluetoothItem;
@@ -21,6 +21,7 @@ use crate::items::{BatteryItem, LayoutItem};
 use crate::network::{NetworkItem, VpnItem};
 use crate::notifications::Banners;
 use crate::popover::Item;
+use crate::power::PowerItem;
 use crate::sliders::{BrightnessItem, VolumeItem};
 use crate::toggles::{self, Toggle};
 
@@ -34,6 +35,8 @@ pub struct Bar {
     app: String,
     /// The clock, with the notifications' history in its popover.
     clock: ClockItem,
+    /// After the clock.
+    power: Option<PowerItem>,
     /// Each one `None` when the config switches it off.
     layout: Option<LayoutItem>,
     brightness: Option<BrightnessItem>,
@@ -60,6 +63,7 @@ pub struct Init {
     pub night_light: UnboundedSender<bool>,
     pub keep_awake: UnboundedSender<bool>,
     pub notifications: UnboundedSender<notifications::Request>,
+    pub power: UnboundedSender<power::Request>,
     /// The shell's banners, hidden while the clock's popover is open.
     pub banners: Rc<RefCell<Banners>>,
     /// The shell's one password dialog.
@@ -136,6 +140,7 @@ impl Component for Bar {
             all: Vec::new(),
             workspaces: Vec::new(),
             app: String::new(),
+            power: (config.power).then(|| PowerItem::new(init.power.clone(), &init.blur)),
             clock: ClockItem::new(
                 config.notifications.then(|| init.notifications.clone()),
                 init.banners.clone(),
@@ -187,6 +192,9 @@ impl Component for Bar {
             widgets.right.append(&button);
         }
         widgets.right.append(&model.clock.item.button);
+        if let Some(power) = &model.power {
+            widgets.right.append(&power.item.button);
+        }
         ComponentParts { model, widgets }
     }
 
@@ -206,6 +214,11 @@ impl Component for Bar {
             }
             Msg::Update(Update::Clock(clock)) => self.clock.label.set_label(&clock),
             Msg::Update(Update::Notifications(state)) => self.clock.show(&state),
+            Msg::Update(Update::Power(offered)) => {
+                if let Some(item) = &self.power {
+                    item.show(offered.as_ref());
+                }
+            }
             Msg::Update(Update::Battery(battery)) => {
                 if let Some(item) = &self.battery {
                     item.show(battery.as_ref());
@@ -250,7 +263,14 @@ impl Component for Bar {
                 }
             }
             // The dialog's, which the shell passes to it.
-            Msg::Update(Update::Joined(_) | Update::Prompt(_) | Update::PromptClosed(_)) => {}
+            Msg::Update(
+                Update::Joined(_)
+                | Update::Prompt(_)
+                | Update::PromptClosed(_)
+                | Update::Asked(..)
+                | Update::Acted(..)
+                | Update::Interrupted,
+            ) => {}
             Msg::App(app) => self.app = app,
             Msg::Connector => {}
         }

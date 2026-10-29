@@ -14,6 +14,7 @@ use gtk4::{self as gtk, gdk, glib, prelude::*};
 use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
 use shell_core::agent::{self, Prompt, PromptKind, Secrets};
 use shell_core::network::{self, Eap, Joined, Request, Secret, Security};
+use shell_core::power::{self, Action};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::blur::Blur;
@@ -37,18 +38,27 @@ pub struct Dialog {
     focused: RefCell<Option<String>>,
     network: UnboundedSender<Request>,
     answers: UnboundedSender<agent::Answer>,
+    power: UnboundedSender<power::Request>,
+    /// A power action's countdown, while it runs.
+    countdown: RefCell<Option<glib::SourceId>>,
 }
 
 /// What the dialog is open for.
 enum Asking {
-    Join { ssid: String, security: Security },
+    Join {
+        ssid: String,
+        security: Security,
+    },
     Agent(u64),
+    /// A power action: asked about (a restart, shut down or log out), or refused.
+    Power(Action),
 }
 
 impl Dialog {
     pub fn new(
         network: UnboundedSender<Request>,
         answers: UnboundedSender<agent::Answer>,
+        power: UnboundedSender<power::Request>,
         blur: &Option<Rc<Blur>>,
     ) -> Rc<Self> {
         let window = gtk::Window::builder().css_classes(["dialog"]).build();
@@ -138,6 +148,8 @@ impl Dialog {
             focused: RefCell::default(),
             network,
             answers,
+            power,
+            countdown: RefCell::default(),
         });
         let weak = Rc::downgrade(&dialog);
         let on = move |f: fn(&Dialog)| {
@@ -159,6 +171,16 @@ impl Dialog {
             let submit = on(Dialog::submit);
             entry.connect_activate(move |_| submit());
         }
+        // Gone from the screen while counting down (its output unplugged): called off,
+        // not to happen unseen.
+        let weak = Rc::downgrade(&dialog);
+        dialog.window.connect_unmap(move |_| {
+            if let Some(dialog) = weak.upgrade()
+                && dialog.countdown.borrow().is_some()
+            {
+                dialog.cancel();
+            }
+        });
         let keys = gtk::EventControllerKey::new();
         let escape = on(Dialog::cancel);
         keys.connect_key_pressed(move |_, key, _, _| {
@@ -222,18 +244,97 @@ impl Dialog {
         self.asking.replace(Some(Asking::Agent(prompt.id)));
     }
 
-    /// A join has ended: closed if it succeeded, else the error shown.
+    /// Ask before a restart, a shut down or a log out, which comes by itself after
+    /// `seconds`, showing what blocks it. A prompt already open is cancelled.
+    pub fn ask_power(self: &Rc<Self>, action: Action, seconds: u32, blockers: Vec<String>) {
+        self.cancel();
+        let (heading, what) = match action {
+            Action::Reboot => ("Restart?", "Your computer will restart"),
+            Action::LogOut => ("Log Out?", "You will be logged out"),
+            _ => ("Shut Down?", "Your computer will shut down"),
+        };
+        self.open(heading, "", false, None);
+        self.password.set_visible(false);
+        self.options.set_visible(false);
+        self.join.set_label(&heading.replace('?', ""));
+        self.join.grab_focus();
+        self.asking.replace(Some(Asking::Power(action)));
+        let blocked: String = blockers.iter().map(|b| format!("\n{b}")).collect();
+        let blocked = match blocked.is_empty() {
+            true => blocked,
+            false => format!("\n\nBlocked by:{blocked}"),
+        };
+        let text = move |left: u32| {
+            let unit = if left == 1 { "second" } else { "seconds" };
+            format!("{what} in {left} {unit}.{blocked}")
+        };
+        self.body.set_label(&text(seconds));
+        let (dialog, mut left) = (Rc::downgrade(self), seconds);
+        let tick = glib::timeout_add_seconds_local(1, move || {
+            let Some(dialog) = dialog.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            left = left.saturating_sub(1);
+            dialog.body.set_label(&text(left));
+            if left > 0 {
+                return glib::ControlFlow::Continue;
+            }
+            dialog.countdown.take();
+            dialog.submit();
+            glib::ControlFlow::Break
+        });
+        self.countdown.replace(Some(tick));
+    }
+
+    /// A sleep starts, or the session locks: a power action asked about is called off.
+    pub fn interrupted(&self) {
+        if matches!(&*self.asking.borrow(), Some(Asking::Power(_))) {
+            self.cancel();
+        }
+    }
+
+    /// A power action done, or refused: its dialog closed, or shown again with logind's
+    /// error; a refused lock or sleep (asked without a dialog) gets one, to say so.
+    pub fn acted(self: &Rc<Self>, action: Action, error: Option<String>) {
+        let ours = matches!(&*self.asking.borrow(), Some(Asking::Power(open)) if *open == action);
+        if let (false, Some(_), Action::Lock | Action::Suspend) = (ours, &error, action) {
+            let heading = if action == Action::Lock {
+                "Not Locked"
+            } else {
+                "Not Asleep"
+            };
+            self.cancel();
+            self.open(heading, "", false, None);
+            self.password.set_visible(false);
+            self.join.set_visible(false);
+            self.asking.replace(Some(Asking::Power(action)));
+        }
+        // Not a dialog cancelled since: only a refused lock or sleep, which has none.
+        let refused = error.is_some() && matches!(action, Action::Lock | Action::Suspend);
+        self.finished(ours || refused, error.as_deref());
+    }
+
+    /// A join has ended.
     pub fn joined(&self, joined: &Joined) {
         let ours = matches!(&*self.asking.borrow(), Some(Asking::Join { ssid, .. }) if *ssid == joined.ssid);
-        if !ours {
-            return;
-        }
-        match &joined.error {
+        self.finished(ours, joined.error.as_deref());
+    }
+
+    /// What the dialog asked for has ended, if it is `ours`: done, it closes; else it is
+    /// shown again (hidden while it ran), with the error.
+    fn finished(&self, ours: bool, error: Option<&str>) {
+        match error {
+            _ if !ours => {}
             None => self.close(),
             Some(error) => {
                 self.show_error(error);
                 self.join.set_sensitive(true);
-                self.password.grab_focus();
+                self.window.set_keyboard_mode(KeyboardMode::OnDemand);
+                self.window.set_visible(true);
+                match self.password.is_visible() {
+                    true => self.password.grab_focus(),
+                    false => self.join.grab_focus(),
+                };
             }
         }
     }
@@ -253,6 +354,9 @@ impl Dialog {
         self.password.set_text("");
         self.show_error("");
         self.join.set_sensitive(true);
+        self.join.set_label("Join");
+        self.join.set_visible(true);
+        self.password.set_visible(true);
         let focused = self.focused.borrow().clone();
         let monitors = gdk::Display::default().map(|d| d.monitors());
         let monitor = monitors
@@ -295,6 +399,18 @@ impl Dialog {
                     .answers
                     .send((*id, Some(Secrets { identity, password })));
             }
+            // Hidden until it is done (polkit may ask, in a window of its own), or shown
+            // again with its refusal.
+            Some(Asking::Power(action)) => {
+                if let Some(tick) = self.countdown.take() {
+                    tick.remove();
+                }
+                let _ = self.power.send(power::Request::Act(*action));
+                self.join.set_sensitive(false);
+                self.window.set_keyboard_mode(KeyboardMode::None);
+                self.window.set_visible(false);
+                return;
+            }
             None => {}
         }
         self.close();
@@ -314,6 +430,9 @@ impl Dialog {
     }
 
     fn close(&self) {
+        if let Some(tick) = self.countdown.take() {
+            tick.remove();
+        }
         self.asking.replace(None);
         self.password.set_text("");
         self.window.set_keyboard_mode(KeyboardMode::None);

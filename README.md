@@ -75,6 +75,8 @@ backlight "amdgpu_bl1"
 | `night-light` | `true` | Show the night light toggle, when its unit exists. |
 | `night-light-unit` | `"wlsunset.service"` | The user unit the night light starts and stops (wlsunset, as home-manager's `services.wlsunset` runs it). |
 | `keep-awake` | `true` | Show the keep awake toggle: while on, a logind idle inhibitor. |
+| `power` | `true` | Show the power menu after the clock. |
+| `power-countdown` | `60` | The seconds a restart, a shut down or a log out waits in its dialog before it happens. |
 | `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock has no popover. |
 | `notification-position` | `"top-right"` | Where banners show on the focused output: `"top-left"`, `"top"`, `"top-right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`. |
 | `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
@@ -82,6 +84,12 @@ backlight "amdgpu_bl1"
 
 The four sizes follow the height unless set, in macOS's proportions at 24 px; each must be
 at most the height. The clock is redrawn on each minute and after a resume from sleep.
+
+The power menu is the rightmost item, after the clock: Lock Screen, Sleep, Restart…, Shut
+Down… and Log Out… (each of the first four only when logind offers it). Restart, Shut
+Down and Log Out ask first and happen by themselves after `power-countdown` seconds; the
+dialog lists the apps that block them (logind's block inhibitors) and logind's error if
+it refuses. Logging out quits niri.
 
 The items on the right, right to left after the clock: the battery, the network,
 Bluetooth, VPN, the volume, keep awake, the night light, the brightness, the keyboard

@@ -13,6 +13,7 @@ mod network;
 mod notifications;
 mod osd;
 mod popover;
+mod power;
 mod shell;
 mod sliders;
 mod toggles;
