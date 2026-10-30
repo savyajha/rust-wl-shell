@@ -510,7 +510,11 @@ for bars, at debug for the others, which map on every showing); the request take
 with GTK's next commit. A bar's region is all of it; the OSD's and the dialog's are
 their surface with its corners rounded (half the height for the OSD's pill, 14 px for
 the dialog), two rows of pixels at a time, so that the blur does not show past the
-corners. A popover's is its contents (its first child's bounds) so rounded at 10 px,
+corners. With `niri-blur-rule`, the dialog, the banners and the OSD are given no blur
+object: niri 26.04 clips a region a layer surface sets to its rectangles, not to the
+rule's `geometry-corner-radius` (`render_for_tile` with `clip_to_geometry` false), so
+whole-pixel rows step at a fractional scale; with no region, the rule's blur is rounded
+by niri, anti-aliased (the README's rules). A popover's is its contents (its first child's bounds) so rounded at 10 px,
 and its arrow, row by row: the arrow is GTK 4.22's (`gtk_popover_get_gap_coords`), 12
 px from its tip to the contents and 24 px wide at its base, its tip at the middle of the
 button (the button's bounds in the bar, less the popup's position, from `GdkPopup`), its

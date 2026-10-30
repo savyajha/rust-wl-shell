@@ -77,6 +77,7 @@ backlight "amdgpu_bl1"
 | `keep-awake` | `true` | Show the keep awake toggle: while on, a logind idle inhibitor. |
 | `power` | `true` | Show the power menu after the clock. |
 | `power-countdown` | `60` | The seconds a restart, a shut down or a log out waits in its dialog before it happens. |
+| `niri-blur-rule` | `false` | Leave the blur behind the dialog, the banners and the OSD to a niri `layer-rule` (below), whose corners are smooth; without the rule they have none. |
 | `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock has no popover. |
 | `notification-position` | `"top-right"` | Where banners show on the focused output: `"top-left"`, `"top"`, `"top-right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`. |
 | `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
@@ -136,6 +137,26 @@ The text is in the system font (GTK's `gtk-font-name`, from GSettings). The look
 for now: a translucent dark tint, white text, and the compositor's blur behind it, which
 needs niri's `ext-background-effect-v1` (a `layer-rule` for the namespace
 `rust-wl-shell` can set its options).
+
+The shell's blur is clipped in whole logical pixels, so at a fractional scale its rounded
+corners show steps past the drawn ones. niri can round the blur itself, but only when
+the surface asks for none (it does not round a region a surface sets). With
+`niri-blur-rule true`, the dialog, the banners and the OSD ask for none, and these rules
+in niri's config blur them with smooth corners (the bar and the popovers keep the
+shell's blur):
+
+```kdl
+layer-rule {
+    match namespace="^rust-wl-shell-(notification|dialog)$"
+    geometry-corner-radius 14
+    background-effect { blur true; }
+}
+layer-rule {
+    match namespace="^rust-wl-shell-osd$"
+    geometry-corner-radius 999
+    background-effect { blur true; }
+}
+```
 
 ## home-manager
 

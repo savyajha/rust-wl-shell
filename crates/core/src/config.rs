@@ -77,6 +77,10 @@ pub struct Config {
     /// critical ones stay until dismissed.
     #[knuffel(child, unwrap(argument), default = 10)]
     pub notification_max_timeout: u32,
+    /// The dialog, the banners and the OSD left to a niri `layer-rule` for their blur (its
+    /// corners smooth), rather than blurred by the shell (README).
+    #[knuffel(child, unwrap(argument), default = false)]
+    pub niri_blur_rule: bool,
     /// The power menu, after the clock.
     #[knuffel(child, unwrap(argument), default = true)]
     pub power: bool,
@@ -261,6 +265,7 @@ mod tests {
             notification-max-timeout 20
             power false
             power-countdown 5
+            niri-blur-rule true
             backlight "amdgpu_bl1"
         "#;
         let config = Config::parse("test.kdl", text).unwrap();
@@ -295,6 +300,7 @@ mod tests {
                 notification_max_timeout: 20,
                 power: false,
                 power_countdown: 5,
+                niri_blur_rule: true,
                 backlight: Some("amdgpu_bl1".into()),
             }
         );

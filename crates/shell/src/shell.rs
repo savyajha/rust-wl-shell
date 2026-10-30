@@ -67,12 +67,15 @@ pub fn start(
         power,
     } = core;
     let blur = Blur::new(display).map(Rc::new);
+    // The dialog, the banners and the OSD: blurred by the shell (its region's corners in
+    // whole pixels), or by niri's layer rule, which rounds them smoothly (README).
+    let layer_blur = blur.clone().filter(|_| !config.niri_blur_rule);
     let shell = Rc::new(RefCell::new(Shell {
         niri,
         profiles,
         audio,
         brightness,
-        dialog: Dialog::new(network.clone(), answers, power.clone(), &blur),
+        dialog: Dialog::new(network.clone(), answers, power.clone(), &layer_blur),
         network,
         bluetooth,
         night_light,
@@ -80,11 +83,11 @@ pub fn start(
         banners: Rc::new(RefCell::new(Banners::new(
             config.notification_position,
             notifications.clone(),
-            blur.clone(),
+            layer_blur.clone(),
         ))),
         notifications,
         power,
-        osd: config.osd.then(|| Osd::new(&blur)),
+        osd: config.osd.then(|| Osd::new(&layer_blur)),
         config: Rc::new(config),
         blur,
         bars: Vec::new(),
