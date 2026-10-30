@@ -21,8 +21,6 @@ pub struct Config {
     pub icon_size: Option<u32>,
     #[knuffel(child, unwrap(argument))]
     pub spacing: Option<u32>,
-    #[knuffel(child, unwrap(argument))]
-    pub dot_size: Option<u32>,
     /// A strftime format, as chrono reads it.
     #[knuffel(child, unwrap(argument), default = DEFAULT_CLOCK_FORMAT.into())]
     pub clock_format: String,
@@ -121,7 +119,6 @@ pub struct Sizes {
     pub font: u32,
     pub icon: u32,
     pub spacing: u32,
-    pub dot: u32,
 }
 
 impl Config {
@@ -146,7 +143,6 @@ impl Config {
             ("font-size", sizes.font),
             ("icon-size", sizes.icon),
             ("spacing", sizes.spacing),
-            ("dot-size", sizes.dot),
         ] {
             ensure!(
                 (1..=config.height).contains(&size),
@@ -168,7 +164,7 @@ impl Config {
     }
 
     /// The sizes: those set, else macOS's proportions at 24 px (text 13, icons 16, spacing
-    /// 8, workspace dots 6) scaled to the height.
+    /// 8) scaled to the height.
     pub fn sizes(&self) -> Sizes {
         let scaled = |at_24: u32| (self.height * at_24 + 12) / 24;
         Sizes {
@@ -176,7 +172,6 @@ impl Config {
             font: self.font_size.unwrap_or_else(|| scaled(13)),
             icon: self.icon_size.unwrap_or_else(|| scaled(16)),
             spacing: self.spacing.unwrap_or_else(|| scaled(8)),
-            dot: self.dot_size.unwrap_or_else(|| scaled(6)),
         }
     }
 }
@@ -216,7 +211,6 @@ mod tests {
             font: 13,
             icon: 16,
             spacing: 8,
-            dot: 6,
         };
         assert_eq!(config.sizes(), sizes);
     }
@@ -229,7 +223,6 @@ mod tests {
             font: 16,
             icon: 20,
             spacing: 10,
-            dot: 8,
         };
         assert_eq!(config.sizes(), sizes);
     }
@@ -241,7 +234,6 @@ mod tests {
             font-size 14
             icon-size 18
             spacing 6
-            dot-size 7
             clock-format "%A, %-d %b %H:%M"
             position "bottom"
             workspaces false
@@ -276,7 +268,6 @@ mod tests {
                 font_size: Some(14),
                 icon_size: Some(18),
                 spacing: Some(6),
-                dot_size: Some(7),
                 clock_format: "%A, %-d %b %H:%M".into(),
                 position: Position::Bottom,
                 workspaces: false,
@@ -320,8 +311,8 @@ mod tests {
             ("height -1", "invalid value"),
             ("font-size 0", "font-size must be 1 to the height (24)"),
             (
-                "height 20\ndot-size 21",
-                "dot-size must be 1 to the height (20)",
+                "height 20\nspacing 21",
+                "spacing must be 1 to the height (20)",
             ),
             ("position \"left\"", "expected one of `top`, `bottom`"),
             ("workspaces \"no\"", "expected boolean"),

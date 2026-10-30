@@ -4,7 +4,7 @@ A macOS-style top bar for the [niri](https://github.com/YaLTeR/niri) Wayland com
 in GTK4 and [relm4](https://relm4.org).
 
 > **Early work in progress.** It shows a bar on every output: the output's workspaces as
-> dots and the focused app's name on the left; the keyboard layout, the brightness, the
+> pills and the focused app's name on the left; the keyboard layout, the brightness, the
 > volume, VPN, Bluetooth, the network, the battery (with the power mode) and the clock
 > on the right, each item opening its own popover, all over the compositor's blur. More
 > items, notifications and the tray are to come.
@@ -56,10 +56,9 @@ backlight "amdgpu_bl1"
 | `font-size` | 13 at 24 | The text's size in pixels. |
 | `icon-size` | 16 at 24 | Icons' size in pixels. |
 | `spacing` | 8 at 24 | The space between items and at the bar's ends, in pixels. |
-| `dot-size` | 6 at 24 | A workspace dot's diameter in pixels. |
 | `clock-format` | `"%a %-d %b %H:%M"` | The clock, as a [chrono strftime](https://docs.rs/chrono/latest/chrono/format/strftime/index.html) format (`Mon 27 Oct 09:41`). |
 | `position` | `"top"` | `"top"`, or `"bottom"` to run it next to another bar at the top. |
-| `workspaces` | `true` | Show the output's workspaces. |
+| `workspaces` | `true` | Show the output's workspaces: a pill (of the icon size) for each with windows and for the one shown, which is wider and filled with the accent; a click switches to it. |
 | `app-name` | `true` | Show the focused window's app name. |
 | `battery` | `true` | Show the battery (UPower's), when there is one. |
 | `battery-percentage` | `false` | Show the battery's percentage next to its icon. |
@@ -83,8 +82,10 @@ backlight "amdgpu_bl1"
 | `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
 | `backlight` | the first | The backlight device to follow, by its name in `/sys/class/backlight`. |
 
-The four sizes follow the height unless set, in macOS's proportions at 24 px; each must be
+The three sizes follow the height unless set, in macOS's proportions at 24 px; each must be
 at most the height. The clock is redrawn on each minute and after a resume from sleep.
+`dot-size` is gone: the workspaces' pills follow `icon-size`, and a config that sets it
+fails `--check`.
 
 The power menu is the rightmost item, after the clock: Lock Screen, Sleep, Restart…, Shut
 Down… and Log Out… (each of the first four only when logind offers it). Restart, Shut

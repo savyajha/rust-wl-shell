@@ -116,7 +116,6 @@ pkgs.testers.runNixOSTest {
       (session.machine {
         height = 28;
         spacing = 8;
-        dot-size = 6;
         clock-format = "%H:%M %d/%m";
       })
     ];
@@ -454,12 +453,13 @@ pkgs.testers.runNixOSTest {
         typing_reaches_the_window("after-bluetooth")
 
     def accent_pixels():
-        """The bar's pixels in GTK's default accent (#3584e4): a toggle that is on."""
+        """The bar's right half's pixels in GTK's default accent (#3584e4): a toggle that is
+        on (the shown workspace's pill, on the left, is in it too)."""
         move(512, 400)
         time.sleep(0.5)
         shot = screen()
         return sum(
-            1 for x in range(0, 1024, 2) for y in range(2, HEIGHT - 2)
+            1 for x in range(512, 1024, 2) for y in range(2, HEIGHT - 2)
             if (lambda p: p[2] > 180 and p[0] < 100)(pixel(shot, x, y))
         )
 

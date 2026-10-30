@@ -370,10 +370,20 @@ to the top (or bottom) and both sides, with an exclusive zone of its height and 
 keyboard focus, namespace `rust-wl-shell`. Its output's name is the monitor's connector,
 which is how niri names outputs. GDK can list a new monitor before its connector is
 known (seen in the VM test when an output is switched back on), so the bar keeps every
-output's workspaces and filters them again when the connector changes. The workspace dots are rebuilt when that output's
-workspaces change: one `button.workspace` per workspace, holding a `.dot`, `.active`
-when shown, labelled "Workspace N" (or its name) for AT-SPI, sending
-`FocusWorkspace` when clicked.
+output's workspaces and filters them again when the connector changes. `workspaces.rs` shows the
+output's workspaces that have windows (a window with that `workspace_id`, the core's
+`occupied`) and the one shown, as vibepanel does: one `button.workspace` each, holding a
+`.pill`, `.active` when shown, labelled "Workspace N" (or its name) for AT-SPI, sending
+`FocusWorkspace` when clicked. A pill is the icon size; the shown one is 11/8 as wide
+(vibepanel's 22 px on 16 on the owner's 30 px bar); a gap of 3/4 of the spacing is split
+either side of it, inside its button. When the workspaces change, every button's width
+(pill and gap) moves linearly, over 200 ms, from where it is to its new one, on one
+clock that a further change starts again (a tick callback on the row): a switch's two
+widths change by opposite amounts, and the widths are rounded where each ends
+(`whole_pixels`), so the row's width, and what comes after it, stay put. A workspace
+added grows from nothing (its gap opening first); one removed keeps its place
+(`merge`), takes no clicks, and shrinks to nothing before its button goes. Before the
+row is mapped, the widths are set at once.
 
 The right side holds the items, then the clock; an item switched off in the config is
 never built.
@@ -492,11 +502,11 @@ user moves the slider. With its output switched off, it shows on the focused one
 
 ### Look
 
-`style.css` is fixed: a 0.35 black tint, white text, hollow dots and a filled active
-one, the app name at weight 600; popovers have the same tint, a 10 px radius and a thin
+`style.css` is fixed: a 0.35 black tint, white text, faint white workspace pills and the
+shown one in the accent, the app name at weight 600; popovers have the same tint, a 10 px radius and a thin
 white outline, with no shadow, so that the surface is the popover's own rectangle;
 sliders and the OSD's level are a white bar on a faint track. Its sizes are CSS
-variables (`--height`, `--font-size`, `--icon-size`, `--spacing`, `--dot-size`), set by
+variables (`--height`, `--font-size`, `--icon-size`, `--spacing`), set by
 one generated rule on `window.bar` and `window.osd` from the config (`main.rs`, `stylesheet`). The font family is the system's
 (`gtk-font-name`).
 
@@ -620,7 +630,11 @@ run on the system bus. The test checks:
    sets neither `GDK_DEBUG` nor `GSK_RENDERER`; with no wlsunset unit in the VM, there is no
    night light item
 2. the bar is 28 px high from the top edge, and tints the grey under it
-3. a click on a workspace dot switches workspace (read back from `niri msg`)
+3. the workspaces' pills (from the pixels and the tree): the shown one alone, blue, at
+   first; an empty workspace has one only while shown, and it is wider; with windows on
+   two, a click on a pill switches workspace (read back from `niri msg`), and once it
+   has animated the pills' row ends and the app's name starts where they did; workspace
+   2 left empty and gone, its pill goes
 4. the app name follows focus: a desktop file's Name, else the app id; on an empty
    workspace the tree still has the bar's clock and none of the apps (from the AT-SPI
    tree)

@@ -7,7 +7,10 @@
 #      starts with the module's unit, logs its start-up marks, and turns blur on
 #   2. the bar is 28 px high, as configured, flush with the top, and tints what is under
 #      it dark
-#   3. one dot per workspace of the output; a click on a dot switches to that workspace
+#   3. the workspaces as pills: one for each workspace of the output with windows and for
+#      the one shown, which is wider and blue (the accent); a click on a pill switches to
+#      its workspace, and once the switch has animated, the app's name after the pills
+#      has not moved; a workspace left empty loses its pill
 #   4. the app name follows focus: a desktop file's Name, else the app id; none on an
 #      empty workspace
 #   5. the clock shows the VM's time in the configured format, `%H:%M %d/%m`
@@ -94,7 +97,6 @@ pkgs.testers.runNixOSTest {
       (session.machine {
         height = 28;
         spacing = 8;
-        dot-size = 6;
         clock-format = "%H:%M %d/%m";
         # Off, so the items' places stay as the test counts them; the night light is on,
         # but hidden: the VM has no wlsunset unit.
@@ -197,14 +199,39 @@ pkgs.testers.runNixOSTest {
         assert tinted == list(range(HEIGHT)), column
         assert all(is_grey(p) for p in column[HEIGHT:]), column
 
-    with subtest("a click on a dot switches workspace"):
+    with subtest("the workspaces: a pill for each with windows, and the one shown"):
+        # The shown one alone, empty: one pill, blue.
+        wait_for_tree(has("button", "Workspace 1"), "the first workspace's pill")
+        runs, _ = pills()
+        assert which_shown(runs) == [True], runs
         spawn("foot")
-        wait_for_tree(has("button", "Workspace 2"), "a second workspace's dot")
-        assert active_workspace() == 1
-        click(*dot(2))
-        retry(lambda _: active_workspace() == 2, 10)
-        click(*dot(1))
+        wait_for_tree(has("label", "Foot"), "Foot")
+        # The empty workspace 2: a pill only while shown, and wider then.
+        assert lacks("button", "Workspace 2")(tree())
+        niri("action focus-workspace 2")
+        wait_for_tree(has("button", "Workspace 2"), "the second workspace's pill")
+        runs, _ = pills()
+        assert which_shown(runs) == [False, True], runs
+        assert runs[1][1] - runs[1][0] >= runs[0][1] - runs[0][0] + 5, runs
+        spawn("foot")
+        wait_for_tree(has("label", "Foot"), "Foot on workspace 2")
+        # A click switches; the app's name after the pills stays where it was.
+        runs, app = pills()
+        click_pill(runs[0])
         retry(lambda _: active_workspace() == 1, 10)
+        after, app_after = pills()
+        assert which_shown(after) == [True, False], after
+        assert app_after == app and after[-1][1] == runs[-1][1], (runs, after, app, app_after)
+        click_pill(after[1])
+        retry(lambda _: active_workspace() == 2, 10)
+        again, app_again = pills()
+        assert again == runs and app_again == app, (runs, again, app, app_again)
+        # Its window closed and left, workspace 2 is gone, and its pill with it.
+        niri("action close-window")
+        niri("action focus-workspace 1")
+        wait_for_tree(lacks("button", "Workspace 2"), "no second workspace's pill")
+        runs, _ = pills()
+        assert which_shown(runs) == [True], runs
 
     with subtest("the app name follows focus"):
         wait_for_tree(has("label", "Foot"), "Foot")
@@ -214,7 +241,7 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(has("label", "NoDesktopFile"), "the app id")
         niri("action focus-column-left")
         wait_for_tree(has("label", "Alpha Test"), "Alpha Test again")
-        click(*dot(2))
+        niri("action focus-workspace 2")
         def no_app(t):
             names = {name for role, name in t if role == "label"}
             apps = {"Foot", "Alpha Test", "NoDesktopFile"}

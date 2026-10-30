@@ -17,6 +17,7 @@ mod power;
 mod shell;
 mod sliders;
 mod toggles;
+mod workspaces;
 
 use std::env;
 use std::ffi::OsString;
@@ -152,11 +153,10 @@ fn stylesheet(sizes: Sizes) -> String {
         font,
         icon,
         spacing,
-        dot,
     } = sizes;
     format!(
         "window.bar, window.osd {{ --height: {height}px; --font-size: {font}px; \
-         --icon-size: {icon}px; --spacing: {spacing}px; --dot-size: {dot}px; }}\n{}",
+         --icon-size: {icon}px; --spacing: {spacing}px; }}\n{}",
         include_str!("style.css")
     )
 }

@@ -258,10 +258,37 @@ in
         workspaces = json.loads(niri("--json workspaces"))
         return next(w["idx"] for w in workspaces if w["output"] == "Virtual-1" and w["is_active"])
 
-    def dot(i):
-        """The i-th dot's centre (from 1): after the bar's padding (spacing, 8), each button
-        is the dot (6) and a quarter of the spacing either side."""
-        return (8 + (i - 1) * 10 + 5, HEIGHT // 2)
+    def pills():
+        """The workspaces' pills, left to right, as [first, last, shown] columns on the
+        bar's middle row (faint white, or the accent, blue, for the one shown), and the
+        first column of white after them (the app's name). The pointer is moved away
+        first, and the animation left to end."""
+        move(512, 400)
+        time.sleep(0.5)
+        shot = screen()
+        runs = []
+        for x in range(0, 512):
+            p = pixel(shot, x, HEIGHT // 2)
+            if any(min(pixel(shot, x, y)) > 180 for y in range(4, HEIGHT - 4)):
+                return [r for r in runs if r[1] - r[0] >= 4], x
+            if p[2] - p[0] > 60:
+                kind = True
+            elif all(abs(c - 135) <= 15 for c in p):
+                # White at 0.3 over the tint.
+                kind = False
+            else:
+                kind = None
+            if kind is not None and runs and runs[-1][1:] == [x - 1, kind]:
+                runs[-1][1] = x
+            elif kind is not None:
+                runs.append([x, x, kind])
+        return [r for r in runs if r[1] - r[0] >= 4], None
+
+    def which_shown(runs):
+        return [r[2] for r in runs]
+
+    def click_pill(run):
+        click((run[0] + run[1]) // 2, HEIGHT // 2)
 
     def right_items():
         """The bar's right side, right to left, as (first, last) columns of white: the

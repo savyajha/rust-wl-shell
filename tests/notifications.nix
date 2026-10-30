@@ -40,7 +40,6 @@ pkgs.testers.runNixOSTest {
       (session.machine {
         height = 28;
         spacing = 8;
-        dot-size = 6;
         clock-format = "%H:%M %d/%m";
         notification-max-timeout = 2;
       })

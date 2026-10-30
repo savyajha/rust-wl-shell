@@ -49,7 +49,6 @@ pkgs.testers.runNixOSTest {
       (session.machine {
         height = 28;
         spacing = 8;
-        dot-size = 6;
         clock-format = "%H:%M %d/%m";
         power-countdown = 3;
         # Nothing else on the system bus, which is the fake one here.

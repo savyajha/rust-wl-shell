@@ -48,6 +48,8 @@ pub struct Workspace {
     pub output: Option<String>,
     /// Shown on its output.
     pub active: bool,
+    /// Has windows.
+    pub occupied: bool,
 }
 
 impl Snapshot {
@@ -62,6 +64,11 @@ impl Snapshot {
                 name: ws.name.clone(),
                 output: ws.output.clone(),
                 active: ws.is_active,
+                occupied: state
+                    .windows
+                    .windows
+                    .values()
+                    .any(|w| w.workspace_id == Some(ws.id)),
             })
             .collect();
         workspaces.sort_by(|a, b| (&a.output, a.idx).cmp(&(&b.output, b.idx)));
@@ -216,6 +223,20 @@ mod tests {
             (None, vec![1]),
         ];
         assert_eq!(shown(&snapshots), want);
+    }
+
+    #[test]
+    fn workspaces_with_windows_are_occupied() {
+        let snapshots = replay(RECORDED);
+        let occupied = |i: usize| -> Vec<u8> {
+            let workspaces = snapshots[i].workspaces.iter();
+            workspaces.filter(|w| w.occupied).map(|w| w.idx).collect()
+        };
+        // Before test.alpha opens; after; on the empty workspace 2; both windows closed.
+        assert_eq!(occupied(7), [] as [u8; 0]);
+        assert_eq!(occupied(8), [1]);
+        assert_eq!(occupied(14), [1]);
+        assert_eq!(occupied(snapshots.len() - 1), [] as [u8; 0]);
     }
 
     #[test]

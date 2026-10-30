@@ -24,14 +24,15 @@ use crate::popover::Item;
 use crate::power::PowerItem;
 use crate::sliders::{BrightnessItem, VolumeItem};
 use crate::toggles::{self, Toggle};
+use crate::workspaces::Workspaces;
 
 pub struct Bar {
     /// Its connector is the output's name, as niri names outputs.
     monitor: gdk::Monitor,
-    niri: UnboundedSender<niri::Command>,
-    /// Every output's workspaces, and this output's, as drawn.
+    /// Every output's workspaces, and this output's shown, as drawn.
     all: Vec<Workspace>,
     workspaces: Vec<Workspace>,
+    switcher: Workspaces,
     app: String,
     /// The clock, with the notifications' history in its popover.
     clock: ClockItem,
@@ -94,8 +95,8 @@ impl Component for Bar {
                 #[wrap(Some)]
                 set_start_widget = &gtk::Box {
                     add_css_class: "left",
-                    #[name = "workspaces"]
-                    gtk::Box {
+                    #[local_ref]
+                    switcher -> gtk::Box {
                         set_visible: init.config.workspaces,
                     },
                     gtk::Label {
@@ -136,9 +137,9 @@ impl Component for Bar {
         let config = &init.config;
         let model = Bar {
             monitor: init.monitor.clone(),
-            niri: init.niri.clone(),
             all: Vec::new(),
             workspaces: Vec::new(),
+            switcher: Workspaces::new(init.niri.clone(), config.sizes()),
             app: String::new(),
             power: (config.power).then(|| PowerItem::new(init.power.clone(), &init.blur)),
             clock: ClockItem::new(
@@ -173,6 +174,7 @@ impl Component for Bar {
                 BatteryItem::new(config.battery_percentage, profiles, &init.blur)
             }),
         };
+        let switcher = &model.switcher.row;
         let widgets = view_output!();
         let item = |item: Option<&Item>| item.map(|i| i.button.clone().upcast::<gtk::Widget>());
         let toggle = |toggle: &Option<Toggle>| toggle.as_ref().map(|t| t.button.clone().upcast());
@@ -275,52 +277,19 @@ impl Component for Bar {
             Msg::Connector => {}
         }
         let connector = self.monitor.connector().map(String::from);
+        // Those with windows, and the one shown (vibepanel's).
         let ours: Vec<Workspace> = self
             .all
             .iter()
             .filter(|ws| ws.output.is_some() && ws.output == connector)
+            .filter(|ws| ws.occupied || ws.active)
             .cloned()
             .collect();
         if ours != self.workspaces {
+            self.switcher.show(&ours);
             self.workspaces = ours;
-            self.draw_workspaces(&widgets.workspaces);
         }
         self.update_view(widgets, sender);
-    }
-}
-
-impl Bar {
-    /// One dot per workspace, rebuilt whenever they change.
-    fn draw_workspaces(&self, row: &gtk::Box) {
-        while let Some(child) = row.first_child() {
-            row.remove(&child);
-        }
-        for ws in &self.workspaces {
-            let dot = gtk::Box::builder()
-                .css_classes(["dot"])
-                .halign(gtk::Align::Center)
-                .valign(gtk::Align::Center)
-                .build();
-            let button = gtk::Button::builder()
-                .css_classes(["workspace"])
-                .child(&dot)
-                .focus_on_click(false)
-                .build();
-            if ws.active {
-                button.add_css_class("active");
-            }
-            let label = match &ws.name {
-                Some(name) => name.clone(),
-                None => format!("Workspace {}", ws.idx),
-            };
-            button.update_property(&[gtk::accessible::Property::Label(&label)]);
-            let (niri, id) = (self.niri.clone(), ws.id);
-            button.connect_clicked(move |_| {
-                // Fails only once the core has stopped, and the shell with it.
-                let _ = niri.send(niri::Command::FocusWorkspace(id));
-            });
-            row.append(&button);
-        }
     }
 }
 
