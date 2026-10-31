@@ -69,6 +69,7 @@ pub struct Init {
     pub banners: Rc<RefCell<Banners>>,
     /// The shell's one password dialog.
     pub dialog: Rc<Dialog>,
+    /// The popovers' blur (none when niri's layer rule blurs them).
     pub blur: Option<Rc<Blur>>,
 }
 
@@ -121,12 +122,10 @@ impl Component for Bar {
         root.set_layer(Layer::Top);
         root.set_keyboard_mode(KeyboardMode::None);
         root.set_monitor(Some(&init.monitor));
-        // Its edge as a class too, for its popovers' style.
-        let (edge, class) = match init.config.position {
-            Position::Top => (Edge::Top, "top"),
-            Position::Bottom => (Edge::Bottom, "bottom"),
+        let edge = match init.config.position {
+            Position::Top => Edge::Top,
+            Position::Bottom => Edge::Bottom,
         };
-        root.add_css_class(class);
         for edge in [edge, Edge::Left, Edge::Right] {
             root.set_anchor(edge, true);
         }
@@ -197,6 +196,23 @@ impl Component for Bar {
         widgets.right.append(&model.clock.item.button);
         if let Some(power) = &model.power {
             widgets.right.append(&power.item.button);
+        }
+        // Each popover opens away from the bar's edge, `popover-gap` from it (GTK's offset
+        // is not flipped with it).
+        let gap = config.popover_gap as i32;
+        let (direction, offset) = match config.position {
+            Position::Top => (gtk::ArrowType::Down, gap),
+            Position::Bottom => (gtk::ArrowType::Up, -gap),
+        };
+        let mut child = widgets.right.first_child();
+        while let Some(widget) = child {
+            if let Some(button) = widget.downcast_ref::<gtk::MenuButton>() {
+                button.set_direction(direction);
+                if let Some(popover) = button.popover() {
+                    popover.set_offset(0, offset);
+                }
+            }
+            child = widget.next_sibling();
         }
         ComponentParts { model, widgets }
     }

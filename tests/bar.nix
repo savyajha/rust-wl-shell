@@ -43,8 +43,9 @@
 #      the built-in tint, the shell running; one with only a warning (`;;`) is applied,
 #      the warning logged; a symlink renamed over it (as home-manager
 #      does) is followed; removed, the built-in tint again
-#  14. a popover's arrow points at its item: drawn, blurred within, and not beside it;
-#      from a bottom bar (a second shell), no line across its base
+#  14. a popover opens 6 px (popover-gap) from the bar, with no arrow, blurred within, its
+#      outline unbroken along its bar-facing edge, its button lit while it is open and not
+#      after; from a bottom bar (a second shell) alike, upward
 
 {
   pkgs,
@@ -484,7 +485,27 @@ pkgs.testers.runNixOSTest {
             "two bars again, each with its workspace",
         )
 
-    with subtest("a popover's arrow points at its item, and is blurred, not beside it"):
+    def gap_and_outline(shot, x, ys):
+        """Column `x` over `ys`, from the bar outward: niri's grey for the gap (6 px), one
+        row of outline (lighter than the tint), then the tint."""
+        column = [pixel(shot, x, y) for y in ys]
+        edge = column[6]
+        ok = all(is_grey(p) for p in column[:6]) and not is_grey(edge) and not is_tint(edge)
+        return ok and all(is_tint(p) for p in column[7:]), column
+
+    def outlined_from_bar(shot, x, ys):
+        """The popover a gap from the bar, outlined across its bar-facing edge (under the
+        button, and 20 px either side)."""
+        for dx in (-20, 0, 20):
+            ok, column = gap_and_outline(shot, x + dx, ys)
+            assert ok, (dx, column)
+
+    def lit(shot, first, y):
+        """The item's button lit: its plate, 3 px before its first white, lighter than the
+        bar's tint."""
+        return not is_tint(pixel(shot, first - 3, y))
+
+    with subtest("a popover opens a gap from the bar, blurred, outlined, its button lit"):
         # A striped background (niri's grey would hide a blur).
         spawn("${pkgs.swaybg}/bin/swaybg -i ${stripes} -m tile")
         time.sleep(2)
@@ -496,28 +517,31 @@ pkgs.testers.runNixOSTest {
         move(100, 700)
         time.sleep(0.5)
         after = screen()
-        machine.send_monitor_command(f"screendump {machine.out_dir}/arrow.ppm gpu 0")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/popover.ppm gpu 0")
         machine.send_key("esc")
         retry(lambda _: keyboard_free(), 10)
-        # GTK's arrow: 12 px from the button's bottom (2 px above the bar's) to the
-        # contents, 24 px wide at its base, its tip at the button's middle.
-        base = HEIGHT + 10
-        rows = [pixel(after, x, y) for y in range(HEIGHT + 1, base)]
-        assert all(p != pixel(before, x, y) for p, y in zip(rows, range(HEIGHT + 1, base))), rows
-        # Beside it, the desktop as it was: no tint, no blur.
-        for dx in (-20, 20):
-            for y in range(HEIGHT + 1, HEIGHT + 5):
-                assert pixel(after, x + dx, y) == pixel(before, x + dx, y), (dx, y)
-        # In it, near its base, the stripes are smoothed.
+        # Inside it, near its bar-facing edge, the stripes are smoothed.
         def spread(shot):
-            values = [sum(pixel(shot, x + dx, base - 2)) for dx in range(-6, 7)]
+            values = [sum(pixel(shot, x + dx, HEIGHT + 12)) for dx in range(-6, 7)]
             return max(values) - min(values)
         assert spread(before) > 300 and spread(after) < spread(before) // 3, (
             spread(before), spread(after))
         machine.succeed("pkill swaybg")
+        # On niri's grey: the gap, the outline, and the button lit while it is open only.
+        time.sleep(1)
+        click_item(1)
+        time.sleep(1)
+        move(100, 700)
+        time.sleep(0.5)
+        shot = screen()
+        outlined_from_bar(shot, x, range(HEIGHT, HEIGHT + 12))
+        assert lit(shot, first, HEIGHT // 2), "not lit while open"
+        machine.send_key("esc")
+        retry(lambda _: keyboard_free(), 10)
+        time.sleep(0.5)
+        assert not lit(screen(), first, HEIGHT // 2), "lit once closed"
 
-    with subtest("from a bottom bar, the arrow joins its popover with no line at its base"):
-        # A second shell, its bar at the bottom of each output (niri's grey under it).
+    with subtest("from a bottom bar, the popover opens upward, a gap from it, outlined"):
         machine.succeed("printf 'position \"bottom\"\\npower false\\n' > /tmp/bottom.kdl")
         machine.succeed(
             PREFIX + "sh -c 'WAYLAND_DISPLAY=$(basename $(ls ${runtimeDir}/wayland-?)) "
@@ -525,7 +549,9 @@ pkgs.testers.runNixOSTest {
             + "/etc/profiles/per-user/${user}/bin/rust-wl-shell --config /tmp/bottom.kdl "
             + ">/tmp/bottom.log 2>&1 &'"
         )
-        top = 768 - HEIGHT
+        # At the default height, 24 px.
+        bottom_height = 24
+        top = 768 - bottom_height
         def bottom_items():
             move(512, 400)
             time.sleep(0.5)
@@ -545,19 +571,17 @@ pkgs.testers.runNixOSTest {
             bright[-1],
         )
         x = (first + last) // 2
-        click(x, top + HEIGHT // 2)
+        click(x, top + bottom_height // 2)
         time.sleep(1)
         move(100, 300)
         time.sleep(0.5)
         shot = screen()
-        machine.send_monitor_command(f"screendump {machine.out_dir}/arrow-bottom.ppm gpu 0")
-        # Up the arrow's middle, from just above its tip (2 px above the bar) through its
-        # base into the contents: one tint all the way, no line.
-        column = [pixel(shot, x, y) for y in range(top - 24, top - 4)]
-        print(column)
-        assert all(not is_grey(p) for p in column), column
-        assert max(max(p) for p in column) - min(min(p) for p in column) <= 6, column
+        machine.send_monitor_command(f"screendump {machine.out_dir}/popover-bottom.ppm gpu 0")
+        outlined_from_bar(shot, x, range(top - 1, top - 13, -1))
+        assert lit(shot, first, top + bottom_height // 2), "not lit while open"
         machine.send_key("esc")
+        time.sleep(1)
+        assert not lit(screen(), first, top + bottom_height // 2), "lit once closed"
         machine.succeed("pkill -f bottom.kdl")
 
     with subtest("niri's IPC closing ends the shell"):

@@ -145,23 +145,9 @@ window.bar button.toggle.on {
   color: var(--accent-fg);
 }
 
-/* A popover: frosted as the bar, rounded, with a thin outline; its arrow alike. */
-popover.item-popover > arrow {
-  background-color: var(--tint);
-  border: var(--outline-width) solid var(--outline);
-}
-
-/* GTK draws the arrow over the contents' border on its side, which an opaque fill would
-   hide; a translucent one shows it as a line across the arrow's base. So that side has no
-   border: the arrow's own sides outline it. */
-window.bar.top popover.item-popover > contents {
-  border-top-width: 0;
-}
-
-window.bar.bottom popover.item-popover > contents {
-  border-bottom-width: 0;
-}
-
+/* A popover: frosted as the bar, rounded, with a thin outline all round, a gap from the
+   bar (`popover-gap`), its button keeping its plate while it is open (`:checked`), as
+   macOS's. */
 popover.item-popover > contents {
   background-color: var(--tint);
   color: var(--fg);

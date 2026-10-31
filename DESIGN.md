@@ -393,10 +393,10 @@ never built.
 
 `popover.rs` is the component every item is built on: a `GtkMenuButton` (flat, with the
 greeter's chip plate while hovered or open) whose `GtkPopover` GTK places under it,
-with GTK's arrow pointing at the button (styled as the contents: the same tint and
-outline; GTK 4.22 draws the arrow after the contents, over the contents' border on
-its side, which only an opaque fill hides, so that side of the contents has no border,
-by the bar's `top` or `bottom` class, and the arrow's own sides outline it), closes on an
+as macOS's: no arrow, `popover-gap` from the bar (the bar sets each button's direction,
+down from a top bar and up from a bottom one, and its popover's offset, which GTK does
+not flip, so negative upward), outlined all round, its button keeping its hover plate
+while it is open (the inner button is `:checked`). GTK closes it on an
 outside click (so one is open at a time) and on Escape. The bar takes no
 keyboard, so that clicks on it leave the focus with the window; while a popover is open
 the bar's layer surface asks for the keyboard `OnDemand`, so that Escape reaches it,
@@ -539,18 +539,15 @@ for bars, at debug for the others, which map on every showing); the request take
 with GTK's next commit. A bar's region is all of it; the OSD's and the dialog's are
 their surface with its corners rounded (half the height for the OSD's pill, 14 px for
 the dialog), two rows of pixels at a time, so that the blur does not show past the
-corners. With `niri-blur-rule`, the dialog, the banners and the OSD are given no blur
+corners. With `niri-blur-rule`, the dialog, the banners, the OSD and the popovers are
+given no blur
 object: niri 26.04 clips a region a layer surface sets to its rectangles, not to the
 rule's `geometry-corner-radius` (`render_for_tile` with `clip_to_geometry` false), so
 whole-pixel rows step at a fractional scale; with no region, the rule's blur is rounded
-by niri, anti-aliased (the README's rules). A popover's is its contents (its first child's bounds) so rounded at 10 px,
-and its arrow, row by row: the arrow is GTK 4.22's (`gtk_popover_get_gap_coords`), 12
-px from its tip to the contents and 24 px wide at its base, its tip at the middle of the
-button (the button's bounds in the bar, less the popup's position, from `GdkPopup`), its
-base kept clear of the rounded corners; on the contents' top or bottom, whichever side
-has the gap, so a popover opening upward from a bottom bar, or shifted at an output's
-edge, is covered too. The region is set again on each layout of the surface (its size,
-and a popover's place). The effect object is destroyed when it is
+by niri, anti-aliased (the README's rules; a popover is the bar's popup, which a
+`popups { }` block in the rule for the bar's namespace reaches). A popover's is its
+contents (its first child's bounds, inside the room GTK leaves for a shadow) so rounded
+at `popover-radius`. The region is set again on each layout of the surface (its size). The effect object is destroyed when it is
 unmapped. The queue is drained on each request; a later change of capabilities is not followed. GTK 4.23.3 and later bind
 the protocol themselves (a second object is a protocol error), so there the shell logs
 that blur is not supported yet; that path (blur nodes in the snapshot) is to be built
@@ -687,12 +684,12 @@ run on the system bus. The test checks:
     pipewire-pulse the item comes back. The VM has no backlight: no brightness item.
 14. the OSD shows on the focused output (Virtual-2), not on the other; with Virtual-2
     switched off, it shows on Virtual-1 (pixels of each output's bottom middle)
-15. a popover's arrow, over a striped background (swaybg): drawn between the item and the
-    contents (tinted), blurred within (the stripes smoothed near its base), and the
-    strips beside it exactly the background (no tint, no blur)
-16. from a bottom bar (a second shell with `position "bottom"`), the popover opens upward
-    and its arrow's middle column, from above its tip into the contents, is one tint:
-    no line across its base
+15. a popover, over a striped background (swaybg), is blurred within (the stripes
+    smoothed near its bar-facing edge); on niri's grey, columns under its button and 20 px
+    either side are grey for the 6 px gap, then one row of outline, then the tint; its
+    button's plate is lit while it is open and not once it closes
+16. from a bottom bar (a second shell with `position "bottom"`), the popover opens upward,
+    with the same gap, outline and lit button
 17. a user stylesheet setting `--tint` makes the bar red, rewritten blue (each written
     and renamed over the file); one that does not parse leaves the built-in tint, is
     logged, and the shell has not restarted; one with an override and `;;` stays

@@ -35,6 +35,9 @@ pub struct Config {
     pub popover_radius: u32,
     #[knuffel(child, unwrap(argument), default = 14)]
     pub panel_radius: u32,
+    /// The space between the bar and its popovers (vibepanel's `popover_offset`).
+    #[knuffel(child, unwrap(argument), default = 6)]
+    pub popover_gap: u32,
     /// The notifications' history's height before it scrolls.
     #[knuffel(child, unwrap(argument), default = 480)]
     pub history_height: u32,
@@ -192,6 +195,7 @@ impl Config {
             ("pill-gap", sizes.pill_gap, 0..=64),
             ("popover-radius", config.popover_radius, 0..=64),
             ("panel-radius", config.panel_radius, 0..=64),
+            ("popover-gap", config.popover_gap, 0..=64),
             ("history-height", config.history_height, 100..=4000),
             ("osd-margin", config.osd_margin, 0..=1000),
             ("osd-timeout", config.osd_timeout, 100..=60_000),
@@ -282,6 +286,7 @@ mod tests {
         };
         assert_eq!(config.sizes(), sizes);
         assert_eq!((config.popover_radius, config.panel_radius), (10, 14));
+        assert_eq!(config.popover_gap, 6);
         assert_eq!((config.osd_margin, config.osd_timeout), (48, 1500));
         assert_eq!(
             (config.notification_gap, config.notification_width),
@@ -321,6 +326,7 @@ mod tests {
             pill-gap 4
             popover-radius 8
             panel-radius 12
+            popover-gap 4
             history-height 600
             osd-margin 64
             osd-timeout 2000
@@ -367,6 +373,7 @@ mod tests {
                 pill_gap: Some(4),
                 popover_radius: 8,
                 panel_radius: 12,
+                popover_gap: 4,
                 history_height: 600,
                 osd_margin: 64,
                 osd_timeout: 2000,
@@ -419,6 +426,7 @@ mod tests {
             ("pill-size 25", "pill-size must be 1 to the height (24)"),
             ("active-pill-width 0", "active-pill-width must be 1 to 256"),
             ("popover-radius 65", "popover-radius must be 0 to 64"),
+            ("popover-gap 65", "popover-gap must be 0 to 64"),
             ("osd-timeout 50", "osd-timeout must be 100 to 60000"),
             (
                 "workspace-animation 0",
