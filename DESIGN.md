@@ -280,14 +280,28 @@ In the UI (`notifications.rs`, `clock.rs`):
 
 - each banner is a window of its own on the overlay layer of the focused output (niri's),
   anchored at the configured corner, `notification-gap` (8 px) from the edges (and below
-  a bar, by its exclusive zone), `notification-width` (360 px) wide, frosted and rounded at 14 px as the dialog; they stack
+  a bar, by its exclusive zone), `notification-width` (360 px) wide, frosted and rounded at `panel-radius` (14 px); they stack
   from the corner, newest first. A banner shows the app's icon and name, ×, the image
   (`image-data`, as a texture), the summary, the body in Pango markup (as it is, if it
   does not parse) and up to three action buttons; an icon given as a `file://` URI or a
-  path is loaded from the file. Its timer pauses while the pointer is over it, and goes
-  with its window: a replaced notification's banner is built again, with its whole
-  time. While a clock's popover (the history) is open, the banners are hidden, their
-  timers still running.
+  path is loaded from the file. Its countdown (`Countdown`) pauses while the pointer is
+  over it; destroyed with its window still pending (its output gone), the banner
+  expires: a replaced notification's banner is built again, with its whole time. While
+  a clock's popover (the history) is open, the banners are hidden, their countdowns
+  still running: their windows are destroyed (their countdowns taken out first) and
+  built again when it closes, and a banner arriving meanwhile gets its window then.
+  Not hidden windows: GTK 4.22's AT-SPI root answers `GetChildAtIndex` for an index
+  past its shown windows (a client's stale count) with its last window, shown or not,
+  and a hidden window's accessible is unrealized, with no path: the shell crashed in
+  `g_variant_new` (the VM tests' "clock's popover" timeouts). Banners are its last
+  windows, created after the bars, so none may stay hidden; nor may the OSD's and the
+  dialog's, which would be last once no bar is left (no output): both build their
+  window when shown and destroy it when they hide. The dialog builds its widgets with
+  it, from plain state (`View`: its texts, which fields show, the error; never the
+  password), rather than moving them to a new window, which GTK warns of
+  (`gtk_at_context_set_accessible_role`); it keeps what it asks for and its countdown,
+  and its window's unmap (an output gone) still calls a countdown off, and answers
+  NetworkManager's prompt at once (cancelled, rather than left to its 2 min).
 - a click on a banner runs its `default` action, with an activation token from GDK's
   launch context (xdg-activation, niri's), so the app may raise its window.
 - a swipe (`notifications::swipe`): a horizontal `GtkGestureDrag`, or a two-finger
@@ -473,8 +487,12 @@ above 100 % stops it at 100 without that counting as a move).
 
 ### The password dialog
 
-`dialog.rs`: one for the shell, styled as libadwaita's alert dialog in plain GTK (no
-libadwaita): a frosted panel (blurred, rounded at 14 px) on the overlay layer, centred
+`dialog.rs`: one for the shell, styled as libadwaita 1.9's AdwAlertDialog in plain GTK
+(no libadwaita: its rules for the dialog's widgets are ported to `adwaita.css`, which is
+LGPL-2.1-or-later as libadwaita is, scoped to `window.dialog`, with GTK's own theme's borders, shadows and gradients cleared, and its
+colours mapped to the theme's named colours, `@dialog_bg_color` and the others, with
+libadwaita's dark ones as fallbacks; its outline libadwaita's, white at 7%): an opaque panel, rounded at 18 px, with no blur
+(none is asked for, `niri-blur-rule` or not), on the overlay layer, centred
 on the focused output (niri's), namespace `rust-wl-shell-dialog`. A bold heading ("Wi-Fi
 Password Required"), the centred text ('The Wi-Fi network "X" requires a WPA2
 password.'), a `GtkPasswordEntry` with its peek icon, for an enterprise network a
@@ -507,18 +525,26 @@ user moves the slider. With its output switched off, it shows on the focused one
 a spacing scale `--space-xxs` to `--space-xxxl`, radii `--radius-s`, `--radius-m` and
 `--radius-pill`, and widths), and its rules use only them: a 0.35 black tint, white
 text, faint white workspace pills and the shown one in the accent (`--accent`, GTK's
-`@accent_bg_color`), the app name at weight 600; popovers have the same tint, a 10 px
-radius and a thin white outline, with no shadow, so that the surface is the popover's
-own rectangle; sliders and the OSD's level are a white bar on a faint track. A box's
+`@accent_bg_color`), the app name at weight 600; the OSD's level a white bar on a faint
+track. The popovers look as GNOME apps' menus (macOS's principle: the menu bar's menus
+share the apps' menu material), their rules ported from libadwaita to `adwaita.css` with
+the dialog's: opaque in the theme's `@popover_bg_color` and `@popover_fg_color`, a 1 px
+dark outline, rounded at `popover-radius` (libadwaita's 15 px), with no shadow (so the
+surface is the popover's own rectangle) and no blur; rows hover as a menu's items, the
+round icons as circular buttons, switches and sliders libadwaita's. A box's
 spacing is CSS too: its `border-spacing`, which GTK's box layout adds to its (zero)
 `spacing`. Before it, `style.rs` puts one generated `window { }` rule with what the
 config sets: `--height`, `--font-size`, `--icon-size`, `--spacing`, `--popover-radius`
-and `--panel-radius`. The radii are config keys because the blur's region follows them
-(`Corners` in `blur.rs`); the bar's height feeds its exclusive zone; layer-shell margins,
+and `--panel-radius`. The banners' radius is a config key because the blur's region
+follows it (`Corners` in `blur.rs`), and the popovers', which once had blur, stays one; the bar's height feeds its exclusive zone; layer-shell margins,
 the pills' animated sizes and the timings are the config's for the same reason, CSS not
 reaching them. The font family is the system's (`gtk-font-name`).
 
-Both go at GTK's application priority. The user's stylesheet,
+Both go at GTK's application priority, `adwaita.css` appended to `style.css`. Under
+them, at GTK's fallback priority (below the theme's), `fallback.css` defines the named
+colours they use for a theme that has none: the accent's, as GTK's, and libadwaita's
+dark dialog and error colours; a theme or a gtk.css defining any of them wins. The
+user's stylesheet,
 `$XDG_CONFIG_HOME/rust-wl-shell/style.css`, goes over them at user priority, in a
 provider of its own: read at start-up and again on each event of a `GFileMonitor` on it
 but `CHANGED` (a write's end comes as `CHANGES_DONE_HINT`; a rename over it, as
@@ -533,21 +559,18 @@ is logged only.
 
 `blur.rs` makes our own event queue on GDK's Wayland connection (from gdk4-wayland),
 binds `ext_background_effect_manager_v1`, and reads its capabilities with one round
-trip: without blur among them, there is none. Each bar's window, each popover and the
+trip: without blur among them, there is none. Each bar's window, each banner and the
 OSD asks for blur behind its `wl_surface` when it is mapped (logging `blur on` at info
 for bars, at debug for the others, which map on every showing); the request takes effect
-with GTK's next commit. A bar's region is all of it; the OSD's and the dialog's are
-their surface with its corners rounded (half the height for the OSD's pill, 14 px for
-the dialog), two rows of pixels at a time, so that the blur does not show past the
-corners. With `niri-blur-rule`, the dialog, the banners, the OSD and the popovers are
-given no blur
+with GTK's next commit. A bar's region is all of it; the OSD's and the banners' are
+their surface with its corners rounded (half the height for the OSD's pill,
+`panel-radius` for the banners), two rows of pixels at a time, so that the blur does not
+show past the corners. The dialog and the popovers are opaque, with no blur. With
+`niri-blur-rule`, the banners and the OSD are given no blur
 object: niri 26.04 clips a region a layer surface sets to its rectangles, not to the
 rule's `geometry-corner-radius` (`render_for_tile` with `clip_to_geometry` false), so
 whole-pixel rows step at a fractional scale; with no region, the rule's blur is rounded
-by niri, anti-aliased (the README's rules; a popover is the bar's popup, which a
-`popups { }` block in the rule for the bar's namespace reaches). A popover's is its
-contents (its first child's bounds, inside the room GTK leaves for a shadow) so rounded
-at `popover-radius`. The region is set again on each layout of the surface (its size). The effect object is destroyed when it is
+by niri, anti-aliased (the README's rules). The region is set again on each layout of the surface (its size). The effect object is destroyed when it is
 unmapped. The queue is drained on each request; a later change of capabilities is not followed. GTK 4.23.3 and later bind
 the protocol themselves (a second object is a protocol error), so there the shell logs
 that blur is not supported yet; that path (blur nodes in the snapshot) is to be built
@@ -684,9 +707,10 @@ run on the system bus. The test checks:
     pipewire-pulse the item comes back. The VM has no backlight: no brightness item.
 14. the OSD shows on the focused output (Virtual-2), not on the other; with Virtual-2
     switched off, it shows on Virtual-1 (pixels of each output's bottom middle)
-15. a popover, over a striped background (swaybg), is blurred within (the stripes
-    smoothed near its bar-facing edge); on niri's grey, columns under its button and 20 px
-    either side are grey for the 6 px gap, then one row of outline, then the tint; its
+15. a popover, over a striped background (swaybg), is opaque (near its bar-facing edge,
+    libadwaita's dark popover background, the same pixels again over niri's grey); on
+    niri's grey, columns under its button and 20 px either side are grey for the 6 px gap,
+    then one row of dark outline, then the popover's background; its
     button's plate is lit while it is open and not once it closes
 16. from a bottom bar (a second shell with `position "bottom"`), the popover opens upward,
     with the same gap, outline and lit button

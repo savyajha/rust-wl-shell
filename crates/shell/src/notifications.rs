@@ -18,6 +18,16 @@ use crate::blur::{Blur, Corners};
 /// A banner's pending timeout, if it has one.
 type Timer = Rc<RefCell<Option<glib::SourceId>>>;
 
+/// A banner's countdown to `Expired`, which runs whether its window is shown or not.
+#[derive(Clone)]
+struct Countdown {
+    timer: Timer,
+    /// The time left, and since when it runs (`None`: paused by the pointer).
+    left: Rc<Cell<(Duration, Option<Instant>)>>,
+    requests: UnboundedSender<Request>,
+    id: u32,
+}
+
 pub struct Banners {
     corner: Corner,
     /// From the output's edges and between banners; their width; a swipe's distance.
@@ -26,10 +36,13 @@ pub struct Banners {
     swipe: f64,
     requests: UnboundedSender<Request>,
     blur: Option<Rc<Blur>>,
-    /// Newest first, as shown, each with its timer.
-    shown: Vec<(Notification, gtk::Window, Timer)>,
+    /// Newest first, as shown, each with its window (none while hidden) and countdown
+    /// (none for one that stays).
+    shown: Vec<(Notification, Option<gtk::Window>, Option<Countdown>)>,
     /// While the clock's popover (the history) is open: the banners hidden, their time
-    /// still running.
+    /// still running. Their windows are destroyed rather than hidden: GTK 4.22's AT-SPI
+    /// root answers an index past its shown windows with its last window, whose
+    /// accessible a hidden window has unrealized, and crashes on its missing path.
     hidden: bool,
 }
 
@@ -54,47 +67,86 @@ impl Banners {
     /// Hide the banners (`true`), or show them again.
     pub fn hide(&mut self, hidden: bool) {
         self.hidden = hidden;
-        for (_, window, _) in &self.shown {
-            window.set_visible(!hidden);
+        for i in 0..self.shown.len() {
+            let (n, window, countdown) = &self.shown[i];
+            match (hidden, window) {
+                (true, Some(window)) => {
+                    // Its countdown runs on: kept from the window's own end.
+                    let source = countdown.as_ref().and_then(|c| c.timer.take());
+                    window.destroy();
+                    match (countdown, source) {
+                        (Some(c), Some(source)) => *c.timer.borrow_mut() = Some(source),
+                        // Paused by the pointer, which has left with the window.
+                        (Some(c), None) if c.left.get().1.is_none() => c.resume(),
+                        _ => {}
+                    }
+                    self.shown[i].1 = None;
+                }
+                (false, None) => {
+                    let (n, countdown) = (n.clone(), countdown.clone());
+                    // No output: niri's choice, the focused one now (that of their last
+                    // showing may be gone).
+                    self.shown[i].1 = Some(self.banner(&n, None, countdown.as_ref()));
+                }
+                _ => {}
+            }
         }
+        self.stack();
     }
 
     /// Show `state`'s banners on `monitor`: new ones built (a replaced one again), gone
     /// ones closed, all stacked.
     pub fn show(&mut self, state: &Notifications, monitor: Option<&gdk::Monitor>) {
-        self.shown.retain(|(shown, window, timer)| {
+        self.shown.retain(|(shown, window, countdown)| {
             let kept = state.banners.contains(shown);
             if !kept {
                 // Gone from the store already: its timer is not to tell it.
-                if let Some(source) = timer.take() {
+                if let Some(source) = countdown.as_ref().and_then(|c| c.timer.take()) {
                     source.remove();
                 }
-                window.destroy();
+                if let Some(window) = window {
+                    window.destroy();
+                }
             }
             kept
         });
         for n in &state.banners {
             if !self.shown.iter().any(|(shown, _, _)| shown == n) {
-                let (window, timer) = self.banner(n, monitor);
-                self.shown.push((n.clone(), window, timer));
+                let countdown = n.timeout.map(|t| Countdown::start(t, &self.requests, n.id));
+                let window = (!self.hidden).then(|| self.banner(n, monitor, countdown.as_ref()));
+                self.shown.push((n.clone(), window, countdown));
             }
         }
         // Newest nearest the corner: in the order of the state's banners.
         self.shown
             .sort_by_key(|(shown, _, _)| state.banners.iter().position(|n| n == shown));
+        self.stack();
+    }
+
+    /// The banners shown stacked from the corner, a gap apart.
+    fn stack(&self) {
         let vertical = match self.corner {
             Corner::TopLeft | Corner::Top | Corner::TopRight => Edge::Top,
             _ => Edge::Bottom,
         };
         let mut offset = self.gap;
-        for (_, window, _) in &self.shown {
+        for window in self
+            .shown
+            .iter()
+            .filter_map(|(_, window, _)| window.as_ref())
+        {
             window.set_margin(vertical, offset);
             let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, self.width);
             offset += height + self.gap;
         }
     }
 
-    fn banner(&self, n: &Notification, monitor: Option<&gdk::Monitor>) -> (gtk::Window, Timer) {
+    fn banner(
+        &self,
+        n: &Notification,
+        monitor: Option<&gdk::Monitor>,
+        countdown: Option<&Countdown>,
+    ) -> gtk::Window {
         let window = gtk::Window::builder()
             .css_classes(["notification"])
             .default_width(self.width)
@@ -163,68 +215,69 @@ impl Banners {
             });
             card.add_controller(click);
         }
-        let timer = match n.timeout {
-            Some(timeout) => expire(&card, &window, timeout, requests, id),
-            None => Timer::default(),
-        };
+        if let Some(countdown) = countdown {
+            countdown.follow(&card, &window);
+        }
         Blur::attach(&self.blur, &window, Corners::Panel);
-        window.set_visible(!self.hidden);
-        (window, timer)
+        window.set_visible(true);
+        window
     }
 }
 
-/// Send `Expired(id)` after `timeout`, the clock stopped while the pointer is over `card`.
-/// The timer goes with `window`; destroyed with it still pending (not by `Banners`,
-/// which takes it first: its output gone), the banner is expired at once.
-fn expire(
-    card: &gtk::Box,
-    window: &gtk::Window,
-    timeout: Duration,
-    requests: UnboundedSender<Request>,
-    id: u32,
-) -> Timer {
-    // The time left, and since when it runs (`None`: paused).
-    let left = Rc::new(Cell::new((timeout, Some(Instant::now()))));
-    let timer = Timer::default();
-    let gone = requests.clone();
-    let start = {
-        let (left, timer) = (left.clone(), timer.clone());
-        move || {
-            let (requests, fired) = (requests.clone(), timer.clone());
-            let source = glib::timeout_add_local_once(left.get().0, move || {
-                // Gone once fired: not to be removed again.
-                fired.take();
-                let _ = requests.send(Request::Expired(id));
-            });
-            left.set((left.get().0, Some(Instant::now())));
-            *timer.borrow_mut() = Some(source);
-        }
-    };
-    start();
-    let hover = gtk::EventControllerMotion::new();
-    let (paused, timer2) = (left.clone(), timer.clone());
-    hover.connect_enter(move |_, _, _| {
-        if let (Some(source), (time, Some(since))) = (timer2.take(), paused.get()) {
-            source.remove();
-            paused.set((time.saturating_sub(since.elapsed()), None));
-        }
-    });
-    let resumed = timer.clone();
-    hover.connect_leave(move |_| {
-        // Paused by the hover, not fired.
-        if resumed.borrow().is_none() && left.get().1.is_none() {
-            start();
-        }
-    });
-    card.add_controller(hover);
-    let pending = timer.clone();
-    window.connect_destroy(move |_| {
-        if let Some(source) = pending.take() {
-            source.remove();
-            let _ = gone.send(Request::Expired(id));
-        }
-    });
-    timer
+impl Countdown {
+    /// Send `Expired(id)` after `timeout`.
+    fn start(timeout: Duration, requests: &UnboundedSender<Request>, id: u32) -> Self {
+        let countdown = Self {
+            timer: Timer::default(),
+            left: Rc::new(Cell::new((timeout, None))),
+            requests: requests.clone(),
+            id,
+        };
+        countdown.resume();
+        countdown
+    }
+
+    fn resume(&self) {
+        let (requests, fired, id) = (self.requests.clone(), self.timer.clone(), self.id);
+        let source = glib::timeout_add_local_once(self.left.get().0, move || {
+            // Gone once fired: not to be removed again.
+            fired.take();
+            let _ = requests.send(Request::Expired(id));
+        });
+        self.left.set((self.left.get().0, Some(Instant::now())));
+        *self.timer.borrow_mut() = Some(source);
+    }
+
+    /// The clock stopped while the pointer is over `card`. Destroyed with `window` still
+    /// pending (not by `Banners`, which takes it first: its output gone), the banner is
+    /// expired at once.
+    fn follow(&self, card: &gtk::Box, window: &gtk::Window) {
+        let hover = gtk::EventControllerMotion::new();
+        let paused = self.clone();
+        hover.connect_enter(move |_, _, _| {
+            if let (Some(source), (time, Some(since))) = (paused.timer.take(), paused.left.get()) {
+                source.remove();
+                paused
+                    .left
+                    .set((time.saturating_sub(since.elapsed()), None));
+            }
+        });
+        let resumed = self.clone();
+        hover.connect_leave(move |_| {
+            // Paused by the hover, not fired.
+            if resumed.timer.borrow().is_none() && resumed.left.get().1.is_none() {
+                resumed.resume();
+            }
+        });
+        card.add_controller(hover);
+        let pending = self.clone();
+        window.connect_destroy(move |_| {
+            if let Some(source) = pending.timer.take() {
+                source.remove();
+                let _ = pending.requests.send(Request::Expired(pending.id));
+            }
+        });
+    }
 }
 
 /// Run action `key` of notification `id`, with an activation token from `widget`'s

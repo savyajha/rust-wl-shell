@@ -9,7 +9,6 @@ use shell_core::network::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
 use crate::dialog::Dialog;
 use crate::popover::{Circle, Item, Row, Switch};
 
@@ -30,13 +29,9 @@ pub struct NetworkItem {
 }
 
 impl NetworkItem {
-    pub fn new(
-        requests: UnboundedSender<Request>,
-        dialog: Rc<Dialog>,
-        blur: &Option<Rc<Blur>>,
-    ) -> Self {
+    pub fn new(requests: UnboundedSender<Request>, dialog: Rc<Dialog>) -> Self {
         let icon = gtk::Image::new();
-        let item = Item::new(&icon, "Network", blur);
+        let item = Item::new(&icon, "Network");
         let sent = requests.clone();
         let wifi = Switch::new("Wi-Fi", move |on| {
             let _ = sent.send(Request::Wifi(on));
@@ -224,9 +219,9 @@ pub struct VpnItem {
 }
 
 impl VpnItem {
-    pub fn new(requests: UnboundedSender<Request>, blur: &Option<Rc<Blur>>) -> Self {
+    pub fn new(requests: UnboundedSender<Request>) -> Self {
         let icon = gtk::Image::from_icon_name("network-vpn-symbolic");
-        let item = Item::new(&icon, "VPN", blur);
+        let item = Item::new(&icon, "VPN");
         let title = gtk::Label::builder().label("VPN").xalign(0.0).build();
         title.add_css_class("title");
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);

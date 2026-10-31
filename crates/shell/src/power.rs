@@ -2,13 +2,10 @@
 //! Out…, each shown when logind offers it (logging out always). The three with "…" ask
 //! first, in the dialog, and come by themselves when its countdown ends.
 
-use std::rc::Rc;
-
 use gtk4::{self as gtk, prelude::*};
 use shell_core::power::{Action, Power, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
 use crate::popover::{Circle, Item, Row};
 
 pub struct PowerItem {
@@ -18,9 +15,9 @@ pub struct PowerItem {
 }
 
 impl PowerItem {
-    pub fn new(requests: UnboundedSender<Request>, blur: &Option<Rc<Blur>>) -> Self {
+    pub fn new(requests: UnboundedSender<Request>) -> Self {
         let icon = gtk::Image::from_icon_name("system-shutdown-symbolic");
-        let item = Item::new(&icon, "Power", blur);
+        let item = Item::new(&icon, "Power");
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
         item.content.append(&rows);
         let item = Self {

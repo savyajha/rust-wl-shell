@@ -29,9 +29,9 @@ pub struct Config {
     pub active_pill_width: Option<u32>,
     #[knuffel(child, unwrap(argument))]
     pub pill_gap: Option<u32>,
-    /// The corners' radii of the popovers, and of the dialog and the banners (KDL, not CSS:
-    /// the blur behind them follows them too).
-    #[knuffel(child, unwrap(argument), default = 10)]
+    /// The popovers' corners' radius (libadwaita's), and the banners' (KDL, not CSS: the
+    /// blur behind them follows it).
+    #[knuffel(child, unwrap(argument), default = 15)]
     pub popover_radius: u32,
     #[knuffel(child, unwrap(argument), default = 14)]
     pub panel_radius: u32,
@@ -111,7 +111,7 @@ pub struct Config {
     /// critical ones stay until dismissed.
     #[knuffel(child, unwrap(argument), default = 10)]
     pub notification_max_timeout: u32,
-    /// The dialog, the banners and the OSD left to a niri `layer-rule` for their blur (its
+    /// The banners and the OSD left to niri's `layer-rule`s for their blur (its
     /// corners smooth), rather than blurred by the shell (README).
     #[knuffel(child, unwrap(argument), default = false)]
     pub niri_blur_rule: bool,
@@ -285,7 +285,7 @@ mod tests {
             pill_gap: 6,
         };
         assert_eq!(config.sizes(), sizes);
-        assert_eq!((config.popover_radius, config.panel_radius), (10, 14));
+        assert_eq!((config.popover_radius, config.panel_radius), (15, 14));
         assert_eq!(config.popover_gap, 6);
         assert_eq!((config.osd_margin, config.osd_timeout), (48, 1500));
         assert_eq!(

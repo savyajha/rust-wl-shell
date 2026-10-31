@@ -55,7 +55,11 @@ rustPlatform.buildRustPackage {
 
   meta = {
     description = "A macOS-style top bar for niri, in GTK4";
-    license = lib.licenses.mit;
+    # crates/shell/src/adwaita.css, ported from libadwaita, is LGPL-2.1-or-later.
+    license = [
+      lib.licenses.mit
+      lib.licenses.lgpl21Plus
+    ];
     platforms = lib.platforms.linux;
     mainProgram = "rust-wl-shell";
   };

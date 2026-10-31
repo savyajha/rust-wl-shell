@@ -3,10 +3,8 @@
    (README). The config's sizes come before this file as variables too: --height,
    --font-size, --icon-size, --spacing, --popover-radius and --panel-radius. */
 
-/* The accent: GTK's, unless a user's gtk.css (matugen's, for one) defines these at a
-   higher priority, and wins. */
-@define-color accent_bg_color @accent_color;
-@define-color accent_fg_color white;
+/* The named colours used here (the accent, the dialog's) are the GTK theme's, a gtk.css's
+   (matugen's, for one) over it, else fallback.css's. */
 
 window {
   /* Colours. */
@@ -14,19 +12,15 @@ window {
   --accent-fg: @accent_fg_color;
   --fg: white;
   --tint: rgba(0, 0, 0, 0.35);
-  --dialog-tint: rgba(0, 0, 0, 0.5);
   --outline: rgba(255, 255, 255, 0.2);
   --hover: rgba(255, 255, 255, 0.2);
-  --row-hover: rgba(255, 255, 255, 0.12);
   --field: rgba(255, 255, 255, 0.12);
   --button: rgba(255, 255, 255, 0.15);
-  --circle: rgba(255, 255, 255, 0.15);
   --card: rgba(255, 255, 255, 0.08);
   --track: rgba(255, 255, 255, 0.3);
   --level: white;
   --pill: rgba(255, 255, 255, 0.3);
   --pill-hover: rgba(255, 255, 255, 0.45);
-  --error: #ff938a;
   --dim: 0.7;
   --off: 0.5;
 
@@ -50,7 +44,6 @@ window {
   --history-width: 320px;
   --slider-width: 200px;
   --osd-level-width: 200px;
-  --dialog-width: 300px;
   --field-height: 32px;
   --circle-size: 26px;
   --circle-icon-size: 14px;
@@ -58,6 +51,27 @@ window {
   --picture-size: 40px;
   --outline-width: 1px;
   --transition: 200ms;
+
+  /* The dialog, as libadwaita 1.9's AdwAlertDialog: opaque, in the theme's colours; its
+     buttons and fields a mix of its text's colour, as libadwaita's. */
+  --dialog-bg: @dialog_bg_color;
+  --dialog-fg: @dialog_fg_color;
+  /* libadwaita's own: white at 7% in either theme. */
+  --dialog-outline: rgba(255, 255, 255, 0.07);
+  --dialog-accent-bg: @accent_bg_color;
+  --dialog-accent-fg: @accent_fg_color;
+  --dialog-focus: color-mix(in srgb, @accent_color 50%, transparent);
+  --dialog-error: @error_color;
+  --dialog-button: color-mix(in srgb, currentColor 10%, transparent);
+  --dialog-button-hover: color-mix(in srgb, currentColor 15%, transparent);
+  --dialog-button-active: color-mix(in srgb, currentColor 30%, transparent);
+  --dialog-radius: 18px;
+  --dialog-button-radius: 12px;
+  --dialog-width: 300px;
+
+  /* The popovers, as libadwaita's: opaque, in the theme's popover colours. */
+  --popover-bg: @popover_bg_color;
+  --popover-fg: @popover_fg_color;
 }
 
 /* The bar: macOS's dark menu bar, a translucent tint over the compositor's blur, with white
@@ -145,21 +159,17 @@ window.bar button.toggle.on {
   color: var(--accent-fg);
 }
 
-/* A popover: frosted as the bar, rounded, with a thin outline all round, a gap from the
-   bar (`popover-gap`), its button keeping its plate while it is open (`:checked`), as
-   macOS's. */
+/* A popover: as GNOME apps' menus (adwaita.css: opaque, in the theme's popover colours,
+   rounded at `popover-radius`, its rows, switches and sliders libadwaita's), a gap from
+   the bar (`popover-gap`), its button keeping its plate while it is open (`:checked`),
+   as macOS's. Here, its layout. */
 popover.item-popover > contents {
-  background-color: var(--tint);
-  color: var(--fg);
-  border-radius: var(--popover-radius);
-  border: var(--outline-width) solid var(--outline);
-  box-shadow: none;
   padding: var(--space-m) var(--space-s);
   min-width: var(--popover-width);
 }
 
 popover.item-popover .title {
-  font-weight: 600;
+  font-weight: 700;
   margin: 0 var(--space-s) var(--space-xs);
 }
 
@@ -167,16 +177,11 @@ popover.item-popover .slider-row {
   margin: var(--space-xs) var(--space-s) var(--space-l);
 }
 
-/* A row, as macOS's: a flat button with a plate while hovered; a round icon, filled with
-   the accent when it is the one chosen, then its label. */
+/* A row, as macOS's: a flat button (with a plate while hovered, adwaita.css); a round
+   icon, filled with the accent when it is the one chosen, then its label. */
 popover.item-popover button.row {
   all: unset;
   padding: var(--space-xs) var(--space-s);
-  border-radius: var(--radius-s);
-}
-
-popover.item-popover button.row:hover {
-  background-color: var(--row-hover);
 }
 
 popover.item-popover .row-content,
@@ -189,12 +194,6 @@ popover.item-popover .circle {
   min-width: var(--circle-size);
   min-height: var(--circle-size);
   border-radius: var(--radius-pill);
-  background-color: var(--circle);
-}
-
-popover.item-popover .circle.chosen {
-  background-color: var(--accent);
-  color: var(--accent-fg);
 }
 
 popover.item-popover .circle > image {
@@ -215,8 +214,8 @@ popover.item-popover scale {
   min-width: var(--slider-width);
 }
 
-/* The sliders and the OSD's level: a white bar on a faint track, round at the ends. */
-popover.item-popover scale trough,
+/* The OSD's level: a white bar on a faint track, round at the ends (the popovers'
+   sliders are libadwaita's, adwaita.css). */
 window.osd levelbar trough {
   background-color: var(--track);
   border: none;
@@ -224,7 +223,6 @@ window.osd levelbar trough {
   min-height: var(--track-height);
 }
 
-popover.item-popover scale highlight,
 window.osd levelbar block.filled {
   background-color: var(--level);
   border: none;
@@ -289,55 +287,6 @@ popover.item-popover .after {
 
 popover.item-popover expander {
   margin: 0 var(--space-s);
-}
-
-/* The password dialog, as libadwaita's alert dialog: a frosted panel, a bold heading over
-   the centred text, rounded fields, and equal pill buttons, Join filled with the accent. */
-window.dialog {
-  background-color: var(--dialog-tint);
-  color: var(--fg);
-  border: var(--outline-width) solid var(--outline);
-  border-radius: var(--panel-radius);
-  padding: var(--space-xxxl);
-  min-width: var(--dialog-width);
-}
-
-window.dialog .content,
-window.dialog .buttons {
-  border-spacing: var(--space-xl);
-}
-
-window.dialog .options {
-  border-spacing: var(--space-s);
-}
-
-window.dialog .heading {
-  font-weight: 700;
-  font-size: 1.2em;
-}
-
-window.dialog .error {
-  color: var(--error);
-}
-
-window.dialog entry,
-window.dialog dropdown > button,
-window.dialog button.pill {
-  background: var(--field);
-  color: var(--fg);
-  border: none;
-  box-shadow: none;
-  border-radius: var(--radius-m);
-  min-height: var(--field-height);
-}
-
-window.dialog button.pill {
-  border-radius: var(--radius-pill);
-}
-
-window.dialog button.suggested {
-  background: var(--accent);
-  color: var(--accent-fg);
 }
 
 /* A notification's banner: frosted as a popover, a little larger; the app's name dim

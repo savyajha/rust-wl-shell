@@ -1,0 +1,12 @@
+/* Fallbacks for the named colours the shell uses, below the GTK theme's own (at GTK's
+   fallback priority, style.rs): the accent as GTK's, and libadwaita 1.9's dark dialog,
+   error, popover and view colours. A theme or a gtk.css (matugen's, for one) defining any
+   of them wins. */
+@define-color accent_bg_color @accent_color;
+@define-color accent_fg_color white;
+@define-color dialog_bg_color #36363a;
+@define-color dialog_fg_color white;
+@define-color error_color #ff938a;
+@define-color popover_bg_color #36363a;
+@define-color popover_fg_color white;
+@define-color view_bg_color #1d1d20;

@@ -2,13 +2,11 @@
 //! click connecting or disconnecting one. No pairing: that is Settings' job.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use gtk4::{self as gtk, prelude::*};
 use shell_core::bluetooth::{Bluetooth, Device, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
 use crate::popover::{Circle, Item, Row, Switch};
 
 pub struct BluetoothItem {
@@ -22,9 +20,9 @@ pub struct BluetoothItem {
 }
 
 impl BluetoothItem {
-    pub fn new(requests: UnboundedSender<Request>, blur: &Option<Rc<Blur>>) -> Self {
+    pub fn new(requests: UnboundedSender<Request>) -> Self {
         let icon = gtk::Image::new();
-        let item = Item::new(&icon, "Bluetooth", blur);
+        let item = Item::new(&icon, "Bluetooth");
         let sent = requests.clone();
         let switch = Switch::new("Bluetooth", move |on| {
             let _ = sent.send(Request::Power(on));

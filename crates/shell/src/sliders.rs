@@ -8,7 +8,6 @@ use gtk4::{self as gtk, prelude::*};
 use shell_core::audio::{self, Audio, Kind, Output, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
 use crate::popover::{Circle, Item, Row, Slider};
 
 pub struct VolumeItem {
@@ -24,9 +23,9 @@ pub struct VolumeItem {
 }
 
 impl VolumeItem {
-    pub fn new(requests: audio::Requests, blur: &Option<Rc<Blur>>) -> Self {
+    pub fn new(requests: audio::Requests) -> Self {
         let icon = gtk::Image::new();
-        let item = Item::new(&icon, "Volume", blur);
+        let item = Item::new(&icon, "Volume");
         let mute = gtk::Button::builder().css_classes(["mute"]).build();
         let muted = Rc::new(Cell::new(false));
         let (sent, shown) = (requests.clone(), muted.clone());
@@ -114,8 +113,8 @@ pub struct BrightnessItem {
 }
 
 impl BrightnessItem {
-    pub fn new(requests: UnboundedSender<u8>, blur: &Option<Rc<Blur>>) -> Self {
-        let item = Item::new(&gtk::Image::from_icon_name(BRIGHTNESS), "Brightness", blur);
+    pub fn new(requests: UnboundedSender<u8>) -> Self {
+        let item = Item::new(&gtk::Image::from_icon_name(BRIGHTNESS), "Brightness");
         let sun = gtk::Image::from_icon_name(BRIGHTNESS);
         let slider = Slider::new(&sun, "Brightness", move |level| {
             // Fails only once the core has stopped, and the shell with it.

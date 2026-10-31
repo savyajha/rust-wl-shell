@@ -10,7 +10,6 @@ use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
 use crate::notifications::{Banners, act, content, swipe};
 use crate::popover::{Item, Switch};
 
@@ -35,11 +34,10 @@ impl ClockItem {
         config: &Config,
         notifications: Option<UnboundedSender<Request>>,
         banners: Rc<RefCell<Banners>>,
-        blur: &Option<Rc<Blur>>,
     ) -> Self {
         let label = gtk::Label::new(None);
         label.add_css_class("clock");
-        let item = Item::new(&label, "Clock", blur);
+        let item = Item::new(&label, "Clock");
         item.button.set_visible(true);
         let requests = notifications
             .clone()

@@ -10,8 +10,6 @@ use std::rc::Rc;
 use gtk4::{self as gtk, glib, prelude::*};
 use gtk4_layer_shell::{KeyboardMode, LayerShell};
 
-use crate::blur::{Blur, Corners};
-
 pub struct Item {
     pub button: gtk::MenuButton,
     pub popover: gtk::Popover,
@@ -21,7 +19,7 @@ pub struct Item {
 
 impl Item {
     /// An item showing `face` in the bar, named `name` for screen readers.
-    pub fn new(face: &impl IsA<gtk::Widget>, name: &str, blur: &Option<Rc<Blur>>) -> Self {
+    pub fn new(face: &impl IsA<gtk::Widget>, name: &str) -> Self {
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let popover = gtk::Popover::builder()
             .child(&content)
@@ -40,8 +38,6 @@ impl Item {
         // takes it back, should it ever be left asked for).
         popover.connect_show(|popover| keyboard(popover, KeyboardMode::OnDemand));
         popover.connect_closed(|popover| keyboard(popover, KeyboardMode::None));
-        // The radius of style.css.
-        Blur::attach(blur, &popover, Corners::Popover);
         Self {
             button,
             popover,

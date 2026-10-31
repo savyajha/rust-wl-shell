@@ -14,7 +14,6 @@ use shell_core::{Update, audio, bluetooth, network, notifications, power};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::bluetooth::BluetoothItem;
-use crate::blur::Blur;
 use crate::clock::ClockItem;
 use crate::dialog::Dialog;
 use crate::items::{BatteryItem, LayoutItem};
@@ -69,8 +68,6 @@ pub struct Init {
     pub banners: Rc<RefCell<Banners>>,
     /// The shell's one password dialog.
     pub dialog: Rc<Dialog>,
-    /// The popovers' blur (none when niri's layer rule blurs them).
-    pub blur: Option<Rc<Blur>>,
 }
 
 #[derive(Debug)]
@@ -140,17 +137,14 @@ impl Component for Bar {
             workspaces: Vec::new(),
             switcher: Workspaces::new(init.niri.clone(), config),
             app: String::new(),
-            power: (config.power).then(|| PowerItem::new(init.power.clone(), &init.blur)),
+            power: (config.power).then(|| PowerItem::new(init.power.clone())),
             clock: ClockItem::new(
                 config,
                 config.notifications.then(|| init.notifications.clone()),
                 init.banners.clone(),
-                &init.blur,
             ),
-            layout: (config.keyboard_layout)
-                .then(|| LayoutItem::new(init.niri.clone(), &init.blur)),
-            brightness: (config.brightness)
-                .then(|| BrightnessItem::new(init.brightness.clone(), &init.blur)),
+            layout: (config.keyboard_layout).then(|| LayoutItem::new(init.niri.clone())),
+            brightness: (config.brightness).then(|| BrightnessItem::new(init.brightness.clone())),
             night_light: (config.night_light).then(|| {
                 let sent = init.night_light.clone();
                 Toggle::new(toggles::NIGHT_LIGHT, "Night light", move |on| {
@@ -163,15 +157,14 @@ impl Component for Bar {
                     let _ = sent.send(on);
                 })
             }),
-            volume: (config.volume).then(|| VolumeItem::new(init.audio.clone(), &init.blur)),
-            vpn: (config.vpn).then(|| VpnItem::new(init.network.clone(), &init.blur)),
-            bluetooth: (config.bluetooth)
-                .then(|| BluetoothItem::new(init.bluetooth.clone(), &init.blur)),
+            volume: (config.volume).then(|| VolumeItem::new(init.audio.clone())),
+            vpn: (config.vpn).then(|| VpnItem::new(init.network.clone())),
+            bluetooth: (config.bluetooth).then(|| BluetoothItem::new(init.bluetooth.clone())),
             network: (config.network)
-                .then(|| NetworkItem::new(init.network.clone(), init.dialog.clone(), &init.blur)),
+                .then(|| NetworkItem::new(init.network.clone(), init.dialog.clone())),
             battery: (config.battery).then(|| {
                 let profiles = config.power_profile.then(|| init.profiles.clone());
-                BatteryItem::new(config.battery_percentage, profiles, &init.blur)
+                BatteryItem::new(config.battery_percentage, profiles)
             }),
         };
         let switcher = &model.switcher.row;

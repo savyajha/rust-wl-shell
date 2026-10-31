@@ -12,14 +12,16 @@
 #      and the popover stays inside the output
 #   3. joining the open network takes a click
 #   4. joining the WPA2 one asks for its password in the dialog (on the focused output,
-#      with the keyboard): a wrong one shows the error in it, the right one joins and closes
-#      it
+#      with the keyboard), opaque (its background's pixels unchanged when the desktop
+#      behind it turns red): a wrong one shows the error in it, the right one joins and
+#      closes it
 #   5. the enterprise network asks for the username too, and its method and domain (in
 #      "Options"), and joins
 #   6. a saved network whose password changed: NM asks the shell's secret agent, whose
 #      dialog answers with the new one; then, asked again, Cancel answers NM with a
 #      cancel; asked again, a join from the popover cancels the prompt for NM at once;
-#      then NM cancelling its request (the device disconnected) closes the dialog
+#      then NM cancelling its request (the device disconnected) closes the dialog;
+#      asked again, its output switched off answers NM at once (no "need auth" left)
 #   7. each way the dialog closes (Join, Cancel, Escape, an error then Cancel, NM's
 #      cancel) gives the keyboard back: typing reaches the window again
 #   8. the Wi-Fi switch turns the radio off and on
@@ -32,6 +34,8 @@
 #      systemctl, the item follows
 #  13. keep awake: off at start; on, logind lists its idle inhibitor (block) and its
 #      idle action (lock, 5 s) waits; off, the action comes
+#  14. no GTK warning of widgets moved between windows (the dialog builds its widgets
+#      for each window) in the shell's journal
 
 {
   pkgs,
@@ -299,6 +303,21 @@ pkgs.testers.runNixOSTest {
         t = tree()
         assert has("label", 'The Wi-Fi network “Home” requires a WPA2 password.')(t), t
         machine.send_monitor_command(f"screendump {machine.out_dir}/dialog.ppm gpu 0")
+        # Opaque: its own pixels (libadwaita's dark dialog background, #36363a, with no
+        # gtk.css here) stay as they are when the desktop behind it turns red (swaybg;
+        # foot covers the output's left half only).
+        first = screen()
+        own = [
+            (x, y) for x in range(200, 824, 2) for y in range(150, 620, 2)
+            if pixel(first, x, y) == (0x36, 0x36, 0x3A)
+        ]
+        spawn("${pkgs.swaybg}/bin/swaybg -c ff0000")
+        retry(lambda _: pixel(screen(), 1000, 700) != pixel(first, 1000, 700), 10)
+        second = screen()
+        assert len(own) > 2000 and any(x > 560 for x, _ in own), len(own)
+        changed = [(x, y) for x, y in own if pixel(second, x, y) != pixel(first, x, y)]
+        assert not changed, changed[:10]
+        machine.succeed("pkill swaybg")
         # Typed straight into it: the dialog has the keyboard.
         machine.send_chars("wrong-password\n")
         wait_for_tree(has("label", "Wrong password or credentials."), "the error")
@@ -397,6 +416,19 @@ pkgs.testers.runNixOSTest {
         machine.succeed("nmcli device disconnect wlan0")
         wait_for_tree(lambda t: not dialog_open(t), "the dialog closed by NM")
         typing_reaches_the_window("after-nm-cancel")
+        # Asked again, then its output goes: NM answered at once (not left to its 2 min).
+        agent_asks()
+        machine.wait_until_succeeds("nmcli -t -f STATE device | grep -q 'need auth'", timeout=10)
+        niri("output Virtual-1 off")
+        machine.wait_until_fails("nmcli -t -f STATE device | grep -q 'need auth'", timeout=10)
+        wait_for_tree(lambda t: not dialog_open(t), "the dialog closed with its output")
+        niri("output Virtual-1 on")
+        wait_for_tree(lambda t: bars(t) == 2, "both bars again")
+        restarts = as_user("systemctl --user show -p NRestarts --value rust-wl-shell").strip()
+        assert restarts == "0", f"the shell restarted {restarts} times"
+        # Its workspace back on Virtual-1 (on the left), focused again: foot has the keyboard.
+        niri("action focus-monitor-left")
+        typing_reaches_the_window("after-output-gone")
 
     with subtest("the Wi-Fi switch"):
         wifi_popover()
@@ -515,5 +547,10 @@ pkgs.testers.runNixOSTest {
         )
         found = [s for s in secrets if s in journals]
         assert not found, found
+
+    with subtest("the dialog's widgets are built for each window, not moved between them"):
+        # GTK warns of widgets moved to a new window with their accessibles realized.
+        journal = machine.succeed(LOG)
+        assert "gtk_at_context_set_accessible_role" not in journal, journal
   '';
 }

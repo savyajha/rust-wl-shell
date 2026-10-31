@@ -6,7 +6,8 @@ in GTK4 and [relm4](https://relm4.org).
 > **Early work in progress.** It shows a bar on every output: the output's workspaces as
 > pills and the focused app's name on the left; the keyboard layout, the brightness, the
 > volume, VPN, Bluetooth, the network, the battery (with the power mode) and the clock
-> on the right, each item opening its own popover, all over the compositor's blur. More
+> on the right, each item opening its own popover (as GNOME apps' menus), the bar over
+> the compositor's blur. More
 > items, notifications and the tray are to come.
 
 > **Please read before using**
@@ -60,9 +61,9 @@ backlight "amdgpu_bl1"
 | `active-pill-width` | 11/8 of the pill | The shown workspace's pill's width. |
 | `pill-gap` | 3/4 of the spacing | The space between workspaces' pills. |
 | `workspace-animation` | `200` | A workspace switch's animation, in ms. |
-| `popover-radius` | `10` | The popovers' corners' radius (the blur behind them follows it). |
+| `popover-radius` | `15` | The popovers' corners' radius (libadwaita's). |
 | `popover-gap` | `6` | The space between the bar and its popovers. |
-| `panel-radius` | `14` | The dialog's and the banners' corners' radius (and their blur's). |
+| `panel-radius` | `14` | The banners' corners' radius (and their blur's). |
 | `history-height` | `480` | The notifications' history's height before it scrolls. |
 | `osd-margin` | `48` | The OSD's distance from the output's bottom edge. |
 | `osd-timeout` | `1500` | How long the OSD shows after the last change, in ms. |
@@ -89,7 +90,7 @@ backlight "amdgpu_bl1"
 | `keep-awake` | `true` | Show the keep awake toggle: while on, a logind idle inhibitor. |
 | `power` | `true` | Show the power menu after the clock. |
 | `power-countdown` | `60` | The seconds a restart, a shut down or a log out waits in its dialog before it happens. |
-| `niri-blur-rule` | `false` | Leave the blur behind the dialog, the banners, the OSD and the popovers to a niri `layer-rule` (below), whose corners are smooth; without the rule they have none. |
+| `niri-blur-rule` | `false` | Leave the blur behind the banners and the OSD to a niri `layer-rule` (below), whose corners are smooth; without the rule they have none. |
 | `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock has no popover. |
 | `notification-position` | `"top-right"` | Where banners show on the focused output: `"top-left"`, `"top"`, `"top-right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`. |
 | `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
@@ -130,7 +131,14 @@ A secured network asks for its password in a dialog in the middle of the focused
 (an enterprise network for a username too, and in "Options" its method and the domain
 its server's certificate must be in). The shell is NetworkManager's secret agent (unless
 `secret-agent` is off), so NetworkManager's own requests (a saved network whose password
-changed, a VPN's password) open the same dialog. Changing the network needs the user to be allowed to by
+changed, a VPN's password) open the same dialog. It looks as GNOME apps' dialogs do
+(libadwaita's alert dialog, its rules ported to `adwaita.css`, loaded after the built-in
+stylesheet), in the GTK theme's colours (`@dialog_bg_color`, `@dialog_fg_color`, the
+accent, `@error_color`, as the theme or a gtk.css such as matugen's defines them, else
+libadwaita's dark ones, from `fallback.css`, below the theme): opaque, with no
+blur behind it, whatever `niri-blur-rule` says, so a niri rule for its namespace
+(`rust-wl-shell-dialog`) is not needed. Its colours are variables too (`--dialog-bg`,
+`--dialog-fg`, `--dialog-accent-bg` and the others in `window { }`). Changing the network needs the user to be allowed to by
 NetworkManager's polkit rules (on NixOS, in the `networkmanager` group). With NM's iwd
 backend, an enterprise network's server is checked against the system's CA bundle,
 which iwd reads only if it holds plain certificates: on NixOS, set
@@ -174,10 +182,9 @@ A file GTK cannot parse in full is left out, its errors logged, and the built-in
 stays; one with only warnings (an empty declaration, `;;`) is applied, its warnings
 logged. The accent defaults to GTK's (`@accent_bg_color`, which a gtk.css can set).
 
-Do not override `--popover-radius`, `--panel-radius` or `--radius-pill` in the
-stylesheet: the shell's blur follows the config's radii, not the CSS, so its corners
-would no longer match. Set the radii with the config's `popover-radius` and
-`panel-radius`, and leave `--radius-pill` round.
+Do not override `--panel-radius` or `--radius-pill` in the stylesheet: the shell's blur
+follows the config's radius, not the CSS, so its corners would no longer match. Set the
+banners' radius with the config's `panel-radius`, and leave `--radius-pill` round.
 
 The shell watches the name `style.css` in its directory: it sees the file written,
 replaced, or renamed over (home-manager's symlink), but not an edit to the file a
@@ -186,14 +193,13 @@ symlink there points to elsewhere.
 The shell's blur is clipped in whole logical pixels, so at a fractional scale its rounded
 corners show steps past the drawn ones. niri can round the blur itself, but only when
 the surface asks for none (it does not round a region a surface sets). With
-`niri-blur-rule true`, the dialog, the banners, the OSD and the popovers ask for none,
-and these rules in niri's config blur them with smooth corners (the bar keeps the shell's
-blur; the popovers are the bar's popups, so a `popups { }` block in a rule for its
-namespace reaches them):
+`niri-blur-rule true`, the banners and the OSD ask for none, and these rules in niri's
+config blur them with smooth corners (the bar keeps the shell's blur; the popovers and
+the dialog are opaque, with no blur):
 
 ```kdl
 layer-rule {
-    match namespace="^rust-wl-shell-(notification|dialog)$"
+    match namespace="^rust-wl-shell-notification$"
     geometry-corner-radius 14
     background-effect { blur true; }
 }
@@ -202,16 +208,9 @@ layer-rule {
     geometry-corner-radius 999
     background-effect { blur true; }
 }
-layer-rule {
-    match namespace="^rust-wl-shell$"
-    popups {
-        geometry-corner-radius 10
-        background-effect { blur true; }
-    }
-}
 ```
 
-The radii are the config's defaults: `panel-radius` (14) and `popover-radius` (10).
+The banners' radius is the config's default `panel-radius` (14).
 
 ## home-manager
 
@@ -255,4 +254,5 @@ See DESIGN.md for how it works and what the tests check.
 
 ## License
 
-MIT.
+MIT (LICENSE), but for `crates/shell/src/adwaita.css`: the dialog's rules, ported from
+libadwaita 1.9.3 and modified, are LGPL-2.1-or-later (LICENSES/LGPL-2.1-or-later.txt).

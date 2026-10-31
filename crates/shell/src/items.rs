@@ -1,7 +1,6 @@
 //! The bar's right-side items, each a `popover::Item`: the battery (with the power mode)
 //! and the keyboard layout. Each is hidden while it has nothing to show.
 
-use std::rc::Rc;
 use std::time::Duration;
 
 use gtk4::{self as gtk, prelude::*};
@@ -10,7 +9,6 @@ use shell_core::upower::{Battery, State};
 use shell_core::{niri, xkb};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
 use crate::popover::{Circle, Item, Row};
 
 pub struct BatteryItem {
@@ -35,18 +33,14 @@ struct PowerMode {
 }
 
 impl BatteryItem {
-    pub fn new(
-        show_percent: bool,
-        profiles: Option<UnboundedSender<String>>,
-        blur: &Option<Rc<Blur>>,
-    ) -> Self {
+    pub fn new(show_percent: bool, profiles: Option<UnboundedSender<String>>) -> Self {
         let face = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         face.add_css_class("face");
         let (icon, percent) = (gtk::Image::new(), gtk::Label::new(None));
         percent.set_visible(show_percent);
         face.append(&icon);
         face.append(&percent);
-        let item = Item::new(&face, "Battery", blur);
+        let item = Item::new(&face, "Battery");
         let lines = [(); 3].map(|()| gtk::Label::builder().xalign(0.0).build());
         lines[0].add_css_class("title");
         for line in &lines {
@@ -158,9 +152,9 @@ pub struct LayoutItem {
 }
 
 impl LayoutItem {
-    pub fn new(niri: UnboundedSender<niri::Command>, blur: &Option<Rc<Blur>>) -> Self {
+    pub fn new(niri: UnboundedSender<niri::Command>) -> Self {
         let short = gtk::Label::new(None);
-        let item = Item::new(&short, "Keyboard layout", blur);
+        let item = Item::new(&short, "Keyboard layout");
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
         item.content.append(&rows);
         Self {

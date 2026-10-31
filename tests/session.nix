@@ -66,7 +66,7 @@ let
         import sys
         import gi
         gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi, GLib  # noqa: E402
+        from gi.repository import Atspi, Gio, GLib  # noqa: E402
 
 
         def walk(node):
@@ -99,6 +99,26 @@ let
                         yield from radios(child)
 
             print(json.dumps(list(radios(bar[0]))))
+        elif sys.argv[1:2] == ["--root-child"]:
+            # The shell's root's child at an index, asked on the a11y bus directly (an
+            # index past its shown windows, as a client whose count is stale asks).
+            session = Gio.bus_get_sync(Gio.BusType.SESSION)
+            address = session.call_sync(
+                "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress",
+                None, None, Gio.DBusCallFlags.NONE, -1).unpack()[0]
+            flags = (Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+                     | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION)
+            a11y = Gio.DBusConnection.new_for_address_sync(address, flags)
+            try:
+                reply = a11y.call_sync(
+                    bar[0].app.bus_name, "/org/a11y/atspi/accessible/root",
+                    "org.a11y.atspi.Accessible", "GetChildAtIndex",
+                    GLib.Variant("(i)", (int(sys.argv[2]),)), None,
+                    Gio.DBusCallFlags.NONE, 5000)
+                print(json.dumps(reply.unpack()))
+            except GLib.Error as e:
+                # No window at all: GTK 4.22 leaves the call unanswered.
+                print(json.dumps(str(e)))
         elif sys.argv[1:2] in (["--checked"], ["--focused"], ["--do"]):
             checked = Atspi.StateType.CHECKED
             focused = Atspi.StateType.FOCUSED
@@ -326,15 +346,15 @@ in
         return [((left + right) // 2, (top + bottom) // 2) for top, bottom, left, right in rows]
 
     def slider_trough(y):
-        """The open popover's slider at row y: the longest run of light pixels (the track,
-        its white part and the knob; not niri's grey around the popover), as (first, last)
-        columns."""
+        """The open popover's slider at row y: the longest run of pixels neither the
+        popover's background nor niri's grey (the track, its accent part and the knob), as
+        (first, last) columns."""
         move(512, 700)
         time.sleep(0.5)
         shot = screen()
         runs, run = [], []
         for x in range(500, 1024):
-            if min(pixel(shot, x, y)) > 110 and not is_grey(pixel(shot, x, y)):
+            if not is_popover(pixel(shot, x, y)) and not is_grey(pixel(shot, x, y)):
                 run.append(x)
             elif run:
                 runs.append(run)
@@ -375,6 +395,10 @@ in
 
     def is_grey(p):
         return all(abs(c - GREY) <= 2 for c in p)
+
+    def is_popover(p):
+        # libadwaita's dark popover background, #36363a (there is no gtk.css here).
+        return all(abs(c - b) <= 3 for c, b in zip(p, (0x36, 0x36, 0x3A)))
 
     def is_tint(p):
         # 0.35 black over grey, blurred or not.

@@ -27,15 +27,14 @@ pub struct Blur {
     qh: QueueHandle<Capabilities>,
     manager: ExtBackgroundEffectManagerV1,
     compositor: WlCompositor,
-    /// The popovers' corners' radius, and the dialog's and the banners' (the config's).
-    radii: (i32, i32),
+    /// The banners' corners' radius (the config's).
+    panel_radius: i32,
 }
 
 /// A surface's corners, which its blur follows.
 pub enum Corners {
     Square,
-    Popover,
-    /// The dialog's and the banners'.
+    /// The banners'.
     Panel,
     /// Rounded at half its height.
     Pill,
@@ -44,7 +43,7 @@ pub enum Corners {
 type Effect = ExtBackgroundEffectSurfaceV1;
 
 impl Blur {
-    pub fn new(display: &gdk::Display, radii: (i32, i32)) -> Option<Self> {
+    pub fn new(display: &gdk::Display, panel_radius: i32) -> Option<Self> {
         let version = (
             gtk::major_version(),
             gtk::minor_version(),
@@ -54,7 +53,7 @@ impl Blur {
             info!("no blur: GTK's own background effect (GTK ≥ 4.23.3) is not supported yet");
             return None;
         }
-        Self::connect(display, radii).unwrap_or_else(|e| {
+        Self::connect(display, panel_radius).unwrap_or_else(|e| {
             warn!("no blur: {e:#}");
             None
         })
@@ -62,7 +61,7 @@ impl Blur {
 
     /// Without the protocol or its blur, `None` (logged here, as both are the compositor's
     /// choice, not an error).
-    fn connect(display: &gdk::Display, radii: (i32, i32)) -> anyhow::Result<Option<Self>> {
+    fn connect(display: &gdk::Display, panel_radius: i32) -> anyhow::Result<Option<Self>> {
         let display = display
             .downcast_ref::<WaylandDisplay>()
             .and_then(|d| d.wl_display())
@@ -90,11 +89,11 @@ impl Blur {
             qh,
             manager,
             compositor,
-            radii,
+            panel_radius,
         }))
     }
 
-    /// Blur behind `native` (a bar's window, a popover, the OSD) while it is mapped: all of
+    /// Blur behind `native` (a bar's window, a banner, the OSD) while it is mapped: all of
     /// it, but for its `corners` (rounded at most at half its height), following its size.
     pub fn attach(
         blur: &Option<Rc<Blur>>,
@@ -106,8 +105,7 @@ impl Blur {
         };
         let radius = match corners {
             Corners::Square => 0,
-            Corners::Popover => blur.radii.0,
-            Corners::Panel => blur.radii.1,
+            Corners::Panel => blur.panel_radius,
             Corners::Pill => i32::MAX,
         };
         let effect: Rc<RefCell<Option<Effect>>> = Rc::default();
@@ -138,7 +136,7 @@ impl Blur {
             effect,
             move |native| {
                 *effect.borrow_mut() = blur.apply(native.upcast_ref(), radius);
-                // Bars once each; popovers and the OSD on every showing.
+                // Bars once each; banners and the OSD on every showing.
                 if effect.borrow().is_some() && native.has_css_class("bar") {
                     info!("blur on");
                 } else if effect.borrow().is_some() {
@@ -175,7 +173,7 @@ impl Blur {
     }
 
     /// Set `effect`'s region to `native` as it is now: all of it, with its corners rounded,
-    /// or for a popover its contents so.
+    /// (a banner, the OSD).
     fn region(&self, effect: &Effect, native: &gtk::Widget, radius: i32) {
         let Some(surface) = native
             .downcast_ref::<gtk::Native>()
@@ -187,18 +185,7 @@ impl Blur {
         if radius == 0 {
             region.add(0, 0, i32::MAX, i32::MAX);
         }
-        let popover = native.downcast_ref::<gtk::Popover>();
-        // Within a popover's surface, outside its contents, GTK leaves room for a shadow.
-        let contents = popover.and_then(|p| p.first_child()?.compute_bounds(p));
-        let (x, y, width, height) = match contents {
-            Some(b) => (
-                b.x() as i32,
-                b.y() as i32,
-                b.width() as i32,
-                b.height() as i32,
-            ),
-            None => (0, 0, surface.width(), surface.height()),
-        };
+        let (x, y, width, height) = (0, 0, surface.width(), surface.height());
         let radius = radius.min(width / 2).min(height / 2).max(0);
         region.add(x, y + radius, width, height - 2 * radius);
         // The corners, two rows at a time.

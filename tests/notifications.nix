@@ -18,10 +18,16 @@
 #      keyboard released when it closes
 #  10. a malformed image-data is left out (the banner shown without it, the shell still
 #      running); a replaced banner gets its whole time; the banners hide while the
-#      clock's popover is open, and come back
+#      clock's popover is open, and come back; meanwhile, the shell's AT-SPI root asked
+#      for a window past those shown (as a client with a stale count asks) answers, and
+#      the shell does not crash (GTK 4.22 answers with its last window, which a hidden
+#      banner's window, its accessible unrealized, crashed it)
 #   9. Do Not Disturb: no banners (but critical ones), the history still fills; a
 #      transient one closed after its id is sent (notify-send --wait returns); it and
 #      the history survive a restart of the shell
+#  11. with both outputs off (no bar left), the shell's AT-SPI root asked for windows 0
+#      and 99 does not crash the shell (it keeps no hidden window: GTK 4.22 answers an
+#      index past its shown windows with its last one, which crashed it if hidden)
 
 {
   pkgs,
@@ -194,6 +200,12 @@ pkgs.testers.runNixOSTest {
         assert banner_layers(), "no banner layer"
         history()
         retry(lambda _: not banner_layers(), 10)
+        # A client asking the shell's root for a window past those shown (its count
+        # stale, the banners just hidden): GTK 4.22 answers with its last window, which
+        # must not be a hidden one (the shell crashed on its missing path).
+        print(as_user("atspi-tree --root-child 99"))
+        restarts = as_user("systemctl --user show -p NRestarts --value rust-wl-shell").strip()
+        assert restarts == "0", f"the shell restarted {restarts} times"
         close_history()
         retry(lambda _: bool(banner_layers()), 10)
         as_user(CALL + f"CloseNotification u {behind}")
@@ -282,5 +294,19 @@ pkgs.testers.runNixOSTest {
         assert banner_gone("Still quiet")(tree()), "Do Not Disturb forgotten"
         assert "Still quiet" in history()
         close_history()
+
+    with subtest("with no output, the shell's AT-SPI root answers, and the shell runs on"):
+        # No bar left: GTK's last window would be a hidden one, if the shell kept any
+        # (the OSD's, the dialog's), and its AT-SPI root crashed on that.
+        niri("output Virtual-1 off")
+        niri("output Virtual-2 off")
+        wait_for_tree(lambda t: bool(t) and bars(t) == 0, "no bar")
+        for index in (0, 99):
+            print(as_user(f"atspi-tree --root-child {index}"))
+        restarts = as_user("systemctl --user show -p NRestarts --value rust-wl-shell").strip()
+        assert restarts == "0", f"the shell restarted {restarts} times"
+        niri("output Virtual-1 on")
+        niri("output Virtual-2 on")
+        wait_for_tree(lambda t: bars(t) == 2, "two bars again")
   '';
 }

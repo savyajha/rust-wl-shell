@@ -202,6 +202,9 @@ pkgs.testers.runNixOSTest {
         counting("the output going")
         niri("output Virtual-1 off")
         nothing_after("its output going")
+        # Called off, not gone with a crash (the shell restarted by its unit).
+        restarts = as_user("systemctl --user show -p NRestarts --value rust-wl-shell").strip()
+        assert restarts == "0", f"the shell restarted {restarts} times"
         niri("output Virtual-1 on")
         wait_for_tree(lambda t: t.count(["button", "Power"]) == 2, "both bars again")
         counting("a sleep")

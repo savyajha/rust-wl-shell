@@ -1,5 +1,6 @@
-//! The look: the built-in stylesheet (`style.css`), after the variables the config sets,
-//! and the user's own, `$XDG_CONFIG_HOME/rust-wl-shell/style.css`, over it and loaded again
+//! The look: the built-in stylesheet (`style.css`, then `adwaita.css`, the dialog's
+//! rules ported from libadwaita), after the variables the config sets, over the fallbacks
+//! for the named colours it uses (`fallback.css`, below the GTK theme), and the user's own, `$XDG_CONFIG_HOME/rust-wl-shell/style.css`, over it and loaded again
 //! whenever it changes.
 
 use std::cell::Cell;
@@ -12,9 +13,13 @@ use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use shell_core::config::Config;
 use tracing::{info, warn};
 
-/// Load the built-in stylesheet, then the user's. The monitor returned follows the user's
-/// file while it is kept.
+/// Load the fallbacks, the built-in stylesheet, then the user's. The monitor returned
+/// follows the user's file while it is kept.
 pub fn load(display: &gdk::Display, config: &Config) -> Option<gio::FileMonitor> {
+    let fallback = gtk::CssProvider::new();
+    fallback.load_from_string(include_str!("fallback.css"));
+    let priority = gtk::STYLE_PROVIDER_PRIORITY_FALLBACK;
+    gtk::style_context_add_provider_for_display(display, &fallback, priority);
     let builtin = gtk::CssProvider::new();
     builtin.load_from_string(&stylesheet(config));
     let priority = gtk::STYLE_PROVIDER_PRIORITY_APPLICATION;
@@ -78,7 +83,8 @@ fn stylesheet(config: &Config) -> String {
     let (popover, panel) = (config.popover_radius, config.panel_radius);
     format!(
         "window {{ --height: {height}px; --font-size: {font}px; --icon-size: {icon}px; \
-         --spacing: {spacing}px; --popover-radius: {popover}px; --panel-radius: {panel}px; }}\n{}",
-        include_str!("style.css")
+         --spacing: {spacing}px; --popover-radius: {popover}px; --panel-radius: {panel}px; }}\n{}{}",
+        include_str!("style.css"),
+        include_str!("adwaita.css")
     )
 }

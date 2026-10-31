@@ -1,6 +1,6 @@
 //! The password dialog, as macOS asks for a Wi-Fi password and styled as libadwaita's
-//! alert dialog (in plain GTK): a frosted panel centred on the focused output, on the
-//! overlay layer, which takes the keyboard while it is open. It asks for joining a network
+//! alert dialog (in plain GTK, opaque, with no blur): a panel centred on the focused
+//! output, on the overlay layer, which takes the keyboard while it is open. It asks for joining a network
 //! from the Wi-Fi popover (and stays open, with the error, until the join succeeds or is
 //! cancelled), and for NetworkManager's own requests, through the secret agent (answered
 //! at once; NM cancelling one closes it). An enterprise network adds the username and a
@@ -17,22 +17,13 @@ use shell_core::network::{self, Eap, Joined, Request, Secret, Security};
 use shell_core::power::{self, Action};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::{Blur, Corners};
-
 pub struct Dialog {
-    window: gtk::Window,
-    heading: gtk::Label,
-    body: gtk::Label,
-    username: gtk::Entry,
-    password: gtk::PasswordEntry,
-    /// An enterprise network's method (PEAP, TTLS), inner method (MSCHAPv2, PAP) and
-    /// domain.
-    options: gtk::Expander,
-    method: gtk::DropDown,
-    inner: gtk::DropDown,
-    domain: gtk::Entry,
-    error: gtk::Label,
-    join: gtk::Button,
+    /// Its window, built afresh for each showing from `view`, and destroyed when it hides:
+    /// a hidden window would be GTK's last toplevel once no bar is left, which its AT-SPI
+    /// root crashes on (`Banners`); and widgets moved to a new window keep their
+    /// accessibles realized, which GTK warns of.
+    shown: RefCell<Option<Shown>>,
+    view: RefCell<View>,
     asking: RefCell<Option<Asking>>,
     /// The focused output's name, as niri names it.
     focused: RefCell<Option<String>>,
@@ -41,6 +32,36 @@ pub struct Dialog {
     power: UnboundedSender<power::Request>,
     /// A power action's countdown, while it runs.
     countdown: RefCell<Option<glib::SourceId>>,
+}
+
+/// What the dialog shows: plain state, never the password.
+#[derive(Clone, Default)]
+struct View {
+    heading: String,
+    body: String,
+    /// The username entry, with its text (an identity NetworkManager has).
+    username: Option<String>,
+    password: bool,
+    /// An enterprise network's method, inner method and domain, in "Options".
+    options: bool,
+    /// The default response's label; none for a dialog that only tells.
+    join: Option<String>,
+    error: String,
+    /// Waiting for what it asked for (a join): its response insensitive.
+    busy: bool,
+}
+
+/// A showing's window and the widgets read or updated while it is open.
+struct Shown {
+    window: gtk::Window,
+    body: gtk::Label,
+    username: gtk::Entry,
+    password: gtk::PasswordEntry,
+    method: gtk::DropDown,
+    inner: gtk::DropDown,
+    domain: gtk::Entry,
+    error: gtk::Label,
+    join: gtk::Button,
 }
 
 /// What the dialog is open for.
@@ -59,15 +80,46 @@ impl Dialog {
         network: UnboundedSender<Request>,
         answers: UnboundedSender<agent::Answer>,
         power: UnboundedSender<power::Request>,
-        blur: &Option<Rc<Blur>>,
     ) -> Rc<Self> {
-        let window = gtk::Window::builder().css_classes(["dialog"]).build();
-        window.init_layer_shell();
-        window.set_namespace(Some("rust-wl-shell-dialog"));
-        window.set_layer(Layer::Overlay);
-        window.set_keyboard_mode(KeyboardMode::None);
-        let label = |class: &str| {
+        Rc::new(Self {
+            shown: RefCell::default(),
+            view: RefCell::default(),
+            asking: RefCell::default(),
+            focused: RefCell::default(),
+            network,
+            answers,
+            power,
+            countdown: RefCell::default(),
+        })
+    }
+
+    /// Show `view` in a window built now on the focused output, with the keyboard; one
+    /// already shown is kept, updated, its password focused again.
+    fn show(self: &Rc<Self>) {
+        let fresh = self.shown.borrow().is_none();
+        if fresh {
+            let shown = self.build();
+            self.shown.replace(Some(shown));
+        }
+        self.update();
+        let (shown, view) = (self.shown.borrow(), self.view.borrow());
+        let Some(s) = shown.as_ref() else { return };
+        s.window.set_keyboard_mode(KeyboardMode::OnDemand);
+        s.window.present();
+        if fresh && view.username.as_deref() == Some("") {
+            s.username.grab_focus();
+        } else if view.password {
+            s.password.grab_focus();
+        } else {
+            s.join.grab_focus();
+        }
+    }
+
+    fn build(self: &Rc<Self>) -> Shown {
+        let view = self.view.borrow().clone();
+        let label = |class: &str, text: &str| {
             let label = gtk::Label::builder()
+                .label(text)
                 .wrap(true)
                 .justify(gtk::Justification::Center)
                 .max_width_chars(30)
@@ -75,47 +127,51 @@ impl Dialog {
             label.add_css_class(class);
             label
         };
-        let (heading, body, error) = (label("heading"), label("body"), label("error"));
-        let username = gtk::Entry::builder().placeholder_text("Username").build();
+        let (heading, body, error) = (
+            label("heading", &view.heading),
+            label("body", &view.body),
+            label("error", ""),
+        );
+        let username = gtk::Entry::builder()
+            .placeholder_text("Username")
+            .text(view.username.as_deref().unwrap_or(""))
+            .visible(view.username.is_some())
+            .build();
         let password = gtk::PasswordEntry::builder()
             .placeholder_text("Password")
             .show_peek_icon(true)
+            .visible(view.password)
             .build();
         let method = gtk::DropDown::from_strings(&["PEAP", "TTLS"]);
         let inner = gtk::DropDown::from_strings(&["MSCHAPv2", "PAP"]);
         let domain = gtk::Entry::builder().placeholder_text("Domain").build();
-        for (name, entry) in [
-            ("Username", username.upcast_ref::<gtk::Widget>()),
-            ("Password", password.upcast_ref()),
-        ] {
-            entry.update_property(&[gtk::accessible::Property::Label(name)]);
-        }
         let options_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
         options_box.add_css_class("options");
         for (name, widget) in [
-            ("Method", method.upcast_ref::<gtk::Widget>()),
+            ("Username", username.upcast_ref::<gtk::Widget>()),
+            ("Password", password.upcast_ref()),
+            ("Method", method.upcast_ref()),
             ("Inner method", inner.upcast_ref()),
             ("Domain", domain.upcast_ref()),
         ] {
             widget.update_property(&[gtk::accessible::Property::Label(name)]);
-            options_box.append(widget);
         }
+        options_box.append(&method);
+        options_box.append(&inner);
+        options_box.append(&domain);
         let options = gtk::Expander::builder()
             .label("Options")
             .child(&options_box)
+            .visible(view.options)
             .build();
-        let cancel = gtk::Button::builder()
-            .label("Cancel")
-            .css_classes(["pill"])
-            .build();
-        let join = gtk::Button::builder()
-            .label("Join")
-            .css_classes(["pill", "suggested"])
-            .build();
-        let buttons = gtk::Box::builder()
-            .homogeneous(true)
-            .css_classes(["buttons"])
-            .build();
+        let (cancel, join) = (gtk::Button::with_label("Cancel"), gtk::Button::new());
+        cancel.add_css_class("response");
+        join.set_css_classes(&["response", "suggested"]);
+        join.set_label(view.join.as_deref().unwrap_or(""));
+        join.set_visible(view.join.is_some());
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        buttons.set_homogeneous(true);
+        buttons.add_css_class("buttons");
         buttons.append(&cancel);
         buttons.append(&join);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -131,68 +187,87 @@ impl Dialog {
         ] {
             content.append(widget);
         }
-        window.set_child(Some(&content));
-        Blur::attach(blur, &window, Corners::Panel);
-        let dialog = Rc::new(Self {
+        let window = gtk::Window::builder()
+            .css_classes(["dialog"])
+            .child(&content)
+            .build();
+        window.init_layer_shell();
+        window.set_namespace(Some("rust-wl-shell-dialog"));
+        window.set_layer(Layer::Overlay);
+        window.set_monitor(self.monitor().as_ref());
+        // Opaque, as GNOME apps' dialogs: no blur behind it.
+        let me = Rc::downgrade(self);
+        let on = move |f: fn(&Rc<Dialog>)| {
+            let me: Weak<Dialog> = me.clone();
+            move || me.upgrade().iter().for_each(f)
+        };
+        // Enter joins, from any entry; Escape cancels.
+        let (submit, cancelled) = (on(Dialog::submit), on(|d| d.cancel()));
+        join.connect_clicked(move |_| submit());
+        cancel.connect_clicked(move |_| cancelled());
+        for entry in [&username, &domain] {
+            let submit = on(Dialog::submit);
+            entry.connect_activate(move |_| submit());
+        }
+        let submit = on(Dialog::submit);
+        password.connect_activate(move |_| submit());
+        let keys = gtk::EventControllerKey::new();
+        let escape = on(|d| d.cancel());
+        keys.connect_key_pressed(move |_, key, _, _| match key {
+            gdk::Key::Escape => {
+                escape();
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        });
+        window.add_controller(keys);
+        // Gone from the screen while counting down (its output unplugged): called off,
+        // not to happen unseen; while NetworkManager asks, answered at once (not left to
+        // its 2 min). Once GTK is done unmapping it: the window is destroyed
+        // then, which inside the unmap (gtk4-layer-shell's remap) crashes. Not when it is
+        // destroyed for hiding: no longer its window then.
+        let me = Rc::downgrade(self);
+        window.connect_unmap(move |window| {
+            let (me, gone) = (me.clone(), window.downgrade());
+            glib::idle_add_local_once(move || {
+                let Some(dialog) = me.upgrade() else { return };
+                let ours = matches!((gone.upgrade(), &*dialog.shown.borrow()),
+                    (Some(w), Some(shown)) if w == shown.window);
+                let agent = matches!(&*dialog.asking.borrow(), Some(Asking::Agent(_)));
+                if ours && (agent || dialog.countdown.borrow().is_some()) {
+                    dialog.cancel();
+                }
+            });
+        });
+        Shown {
             window,
-            heading,
             body,
             username,
             password,
-            options,
             method,
             inner,
             domain,
             error,
             join,
-            asking: RefCell::default(),
-            focused: RefCell::default(),
-            network,
-            answers,
-            power,
-            countdown: RefCell::default(),
-        });
-        let weak = Rc::downgrade(&dialog);
-        let on = move |f: fn(&Dialog)| {
-            let weak: Weak<Dialog> = weak.clone();
-            move || {
-                if let Some(dialog) = weak.upgrade() {
-                    f(&dialog)
-                }
-            }
-        };
-        let submit = on(Dialog::submit);
-        dialog.join.connect_clicked(move |_| submit());
-        let cancel_clicked = on(Dialog::cancel);
-        cancel.connect_clicked(move |_| cancel_clicked());
-        // Enter joins, from any entry; Escape cancels.
-        let submit = on(Dialog::submit);
-        dialog.password.connect_activate(move |_| submit());
-        for entry in [&dialog.username, &dialog.domain] {
-            let submit = on(Dialog::submit);
-            entry.connect_activate(move |_| submit());
         }
-        // Gone from the screen while counting down (its output unplugged): called off,
-        // not to happen unseen.
-        let weak = Rc::downgrade(&dialog);
-        dialog.window.connect_unmap(move |_| {
-            if let Some(dialog) = weak.upgrade()
-                && dialog.countdown.borrow().is_some()
-            {
-                dialog.cancel();
-            }
-        });
-        let keys = gtk::EventControllerKey::new();
-        let escape = on(Dialog::cancel);
-        keys.connect_key_pressed(move |_, key, _, _| {
-            if key == gdk::Key::Escape {
-                escape();
-                return glib::Propagation::Stop;
-            }
-            glib::Propagation::Proceed
-        });
-        dialog.window.add_controller(keys);
-        dialog
+    }
+
+    /// The window shown, if any, brought up to `view`'s body, error and response.
+    fn update(&self) {
+        let view = self.view.borrow();
+        if let Some(shown) = &*self.shown.borrow() {
+            shown.body.set_label(&view.body);
+            shown.error.set_label(&view.error);
+            shown.error.set_visible(!view.error.is_empty());
+            shown.join.set_sensitive(!view.busy);
+        }
+    }
+
+    /// The window destroyed, giving the keyboard back; what it showed is kept.
+    fn hide(&self) {
+        if let Some(shown) = self.shown.take() {
+            shown.window.destroy();
+        }
     }
 
     /// Where the dialog opens next.
@@ -200,9 +275,19 @@ impl Dialog {
         self.focused.replace(output);
     }
 
+    /// The focused output's monitor.
+    fn monitor(&self) -> Option<gdk::Monitor> {
+        let focused = self.focused.borrow().clone()?;
+        let monitors = gdk::Display::default()?.monitors();
+        let monitors = monitors.iter::<gdk::Monitor>().flatten();
+        monitors
+            .into_iter()
+            .find(|m| m.connector().as_deref() == Some(focused.as_str()))
+    }
+
     /// Ask for the password (or the credentials) to join `ssid`.
     /// A prompt already open is cancelled.
-    pub fn ask_join(&self, ssid: String, security: Security) {
+    pub fn ask_join(self: &Rc<Self>, ssid: String, security: Security) {
         self.cancel();
         let body = match security {
             Security::Wpa3 => {
@@ -214,16 +299,21 @@ impl Dialog {
             _ => format!("The Wi-Fi network \u{201c}{ssid}\u{201d} requires a WPA2 password."),
         };
         let eap = security == Security::Enterprise;
-        self.open("Wi-Fi Password Required", &body, eap, None);
-        self.options.set_visible(eap);
         self.asking.replace(Some(Asking::Join { ssid, security }));
+        self.open(View {
+            heading: "Wi-Fi Password Required".into(),
+            body,
+            username: eap.then(String::new),
+            options: eap,
+            ..View::secret()
+        });
     }
 
     /// Ask for what NetworkManager asks for. A prompt already open is cancelled.
-    pub fn ask(&self, prompt: Prompt) {
+    pub fn ask(self: &Rc<Self>, prompt: Prompt) {
         self.cancel();
         let name = &prompt.name;
-        let (heading, body, identity) = match &prompt.kind {
+        let (heading, body, username) = match &prompt.kind {
             PromptKind::Wifi => (
                 "Wi-Fi Password Required",
                 format!("The Wi-Fi network \u{201c}{name}\u{201d} requires a password."),
@@ -240,9 +330,13 @@ impl Dialog {
                 None,
             ),
         };
-        self.open(heading, &body, identity.is_some(), identity.as_deref());
-        self.options.set_visible(false);
         self.asking.replace(Some(Asking::Agent(prompt.id)));
+        self.open(View {
+            heading: heading.into(),
+            body,
+            username,
+            ..View::secret()
+        });
     }
 
     /// Ask before a restart, a shut down or a log out, which comes by itself after
@@ -254,12 +348,6 @@ impl Dialog {
             Action::LogOut => ("Log Out?", "You will be logged out"),
             _ => ("Shut Down?", "Your computer will shut down"),
         };
-        self.open(heading, "", false, None);
-        self.password.set_visible(false);
-        self.options.set_visible(false);
-        self.join.set_label(&heading.replace('?', ""));
-        self.join.grab_focus();
-        self.asking.replace(Some(Asking::Power(action)));
         let blocked: String = blockers.iter().map(|b| format!("\n{b}")).collect();
         let blocked = match blocked.is_empty() {
             true => blocked,
@@ -269,14 +357,21 @@ impl Dialog {
             let unit = if left == 1 { "second" } else { "seconds" };
             format!("{what} in {left} {unit}.{blocked}")
         };
-        self.body.set_label(&text(seconds));
+        self.asking.replace(Some(Asking::Power(action)));
+        self.open(View {
+            heading: heading.into(),
+            body: text(seconds),
+            join: Some(heading.replace('?', "")),
+            ..View::default()
+        });
         let (dialog, mut left) = (Rc::downgrade(self), seconds);
         let tick = glib::timeout_add_seconds_local(1, move || {
             let Some(dialog) = dialog.upgrade() else {
                 return glib::ControlFlow::Break;
             };
             left = left.saturating_sub(1);
-            dialog.body.set_label(&text(left));
+            dialog.view.borrow_mut().body = text(left);
+            dialog.update();
             if left > 0 {
                 return glib::ControlFlow::Continue;
             }
@@ -305,10 +400,11 @@ impl Dialog {
                 "Not Asleep"
             };
             self.cancel();
-            self.open(heading, "", false, None);
-            self.password.set_visible(false);
-            self.join.set_visible(false);
             self.asking.replace(Some(Asking::Power(action)));
+            self.view.replace(View {
+                heading: heading.into(),
+                ..View::default()
+            });
         }
         // Not a dialog cancelled since: only a refused lock or sleep, which has none.
         let refused = error.is_some() && matches!(action, Action::Lock | Action::Suspend);
@@ -316,26 +412,22 @@ impl Dialog {
     }
 
     /// A join has ended.
-    pub fn joined(&self, joined: &Joined) {
+    pub fn joined(self: &Rc<Self>, joined: &Joined) {
         let ours = matches!(&*self.asking.borrow(), Some(Asking::Join { ssid, .. }) if *ssid == joined.ssid);
         self.finished(ours, joined.error.as_deref());
     }
 
     /// What the dialog asked for has ended, if it is `ours`: done, it closes; else it is
     /// shown again (hidden while it ran), with the error.
-    fn finished(&self, ours: bool, error: Option<&str>) {
+    fn finished(self: &Rc<Self>, ours: bool, error: Option<&str>) {
         match error {
             _ if !ours => {}
             None => self.close(),
             Some(error) => {
-                self.show_error(error);
-                self.join.set_sensitive(true);
-                self.window.set_keyboard_mode(KeyboardMode::OnDemand);
-                self.window.set_visible(true);
-                match self.password.is_visible() {
-                    true => self.password.grab_focus(),
-                    false => self.join.grab_focus(),
-                };
+                let mut view = self.view.borrow_mut();
+                (view.error, view.busy) = (error.into(), false);
+                drop(view);
+                self.show();
             }
         }
     }
@@ -347,80 +439,52 @@ impl Dialog {
         }
     }
 
-    fn open(&self, heading: &str, body: &str, username: bool, identity: Option<&str>) {
-        self.heading.set_label(heading);
-        self.body.set_label(body);
-        self.username.set_visible(username);
-        self.username.set_text(identity.unwrap_or(""));
-        self.password.set_text("");
-        self.show_error("");
-        self.join.set_sensitive(true);
-        self.join.set_label("Join");
-        self.join.set_visible(true);
-        self.password.set_visible(true);
-        let focused = self.focused.borrow().clone();
-        let monitors = gdk::Display::default().map(|d| d.monitors());
-        let monitor = monitors
-            .iter()
-            .flat_map(|m| m.iter::<gdk::Monitor>().flatten())
-            .find(|m| focused.is_some() && m.connector().map(String::from) == focused);
-        self.window.set_monitor(monitor.as_ref());
-        self.window.set_keyboard_mode(KeyboardMode::OnDemand);
-        self.window.present();
-        if username && identity.unwrap_or("").is_empty() {
-            self.username.grab_focus();
-        } else {
-            self.password.grab_focus();
-        }
+    fn open(self: &Rc<Self>, view: View) {
+        self.hide();
+        self.view.replace(view);
+        self.show();
     }
 
-    fn submit(&self) {
-        let password = self.password.text().to_string();
-        let identity = self.username.text().to_string();
-        match &*self.asking.borrow() {
-            Some(Asking::Join { ssid, security }) => {
+    fn submit(self: &Rc<Self>) {
+        let read = self.shown.borrow().as_ref().map(|s| Eap {
+            identity: s.username.text().into(),
+            password: s.password.text().into(),
+            peap: s.method.selected() == 0,
+            mschapv2: s.inner.selected() == 0,
+            domain: s.domain.text().into(),
+        });
+        match (&*self.asking.borrow(), read) {
+            (Some(Asking::Join { ssid, security }), Some(eap)) => {
                 let secret = match security {
-                    Security::Enterprise => Secret::Eap(Eap {
-                        identity,
-                        password,
-                        peap: self.method.selected() == 0,
-                        mschapv2: self.inner.selected() == 0,
-                        domain: self.domain.text().to_string(),
-                    }),
-                    _ => Secret::Password(password),
+                    Security::Enterprise => Secret::Eap(eap),
+                    _ => Secret::Password(eap.password),
                 };
                 let ssid = ssid.clone();
                 let _ = self.network.send(network::Request::Join { ssid, secret });
-                self.show_error("Joining\u{2026}");
-                self.join.set_sensitive(false);
-                return;
+                let mut view = self.view.borrow_mut();
+                (view.error, view.busy) = ("Joining\u{2026}".into(), true);
+                drop(view);
+                return self.update();
             }
-            Some(Asking::Agent(id)) => {
+            (Some(Asking::Agent(id)), Some(eap)) => {
+                let (identity, password) = (eap.identity, eap.password);
                 let _ = self
                     .answers
                     .send((*id, Some(Secrets { identity, password })));
             }
             // Hidden until it is done (polkit may ask, in a window of its own), or shown
             // again with its refusal.
-            Some(Asking::Power(action)) => {
+            (Some(Asking::Power(action)), _) => {
                 if let Some(tick) = self.countdown.take() {
                     tick.remove();
                 }
                 let _ = self.power.send(power::Request::Act(*action));
-                self.join.set_sensitive(false);
-                self.window.set_keyboard_mode(KeyboardMode::None);
-                self.window.set_visible(false);
-                return;
+                self.view.borrow_mut().busy = true;
+                return self.hide();
             }
-            None => {}
+            _ => {}
         }
         self.close();
-    }
-
-    /// The error line, hidden when empty.
-    fn show_error(&self, text: &str) {
-        self.error.set_label(text);
-        self.error.set_visible(!text.is_empty());
     }
 
     fn cancel(&self) {
@@ -435,8 +499,17 @@ impl Dialog {
             tick.remove();
         }
         self.asking.replace(None);
-        self.password.set_text("");
-        self.window.set_keyboard_mode(KeyboardMode::None);
-        self.window.set_visible(false);
+        self.hide();
+    }
+}
+
+impl View {
+    /// A prompt for a secret: the password, and Join.
+    fn secret() -> Self {
+        Self {
+            password: true,
+            join: Some("Join".into()),
+            ..Self::default()
+        }
     }
 }

@@ -1,0 +1,392 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later
+
+   The shell's dialog, as libadwaita's AdwAlertDialog, and the bar's popovers, as its
+   popovers and menus. Ported from libadwaita 1.9.3's stylesheet
+   (src/stylesheet/widgets/_message-dialog.scss, _popovers.scss, _menus.scss,
+   _buttons.scss, _entries.scss, _dropdowns.scss, _expanders.scss, _switch.scss,
+   _scale.scss, _labels.scss and _drawing.scss's focus ring), Copyright the libadwaita
+   authors, under the GNU Lesser General Public License 2.1 or later
+   (LICENSES/LGPL-2.1-or-later.txt). Modified: only the rules for the widgets the dialog
+   and the popovers have, scoped under `window.dialog` and `popover.item-popover`, their
+   variables mapped to the GTK theme's named colours (the --dialog-* and --popover-*
+   variables of style.css), the popovers' shadow left out, and GTK's own theme's borders,
+   shadows and gradients cleared, as libadwaita replaces that theme.
+   Loaded right after style.css (style.rs). */
+
+window.dialog {
+  background-color: var(--dialog-bg);
+  color: var(--dialog-fg);
+  box-shadow: inset 0 0 0 1px var(--dialog-outline);
+  border-radius: var(--dialog-radius);
+  padding: 32px 24px 24px;
+  min-width: var(--dialog-width);
+}
+
+window.dialog .content {
+  border-spacing: 10px;
+}
+
+window.dialog .body {
+  font-weight: 400;
+  margin-bottom: 8px;
+}
+
+window.dialog .heading {
+  font-weight: 800;
+  font-size: 136%;
+}
+
+window.dialog .error {
+  color: var(--dialog-error);
+}
+
+window.dialog .options {
+  border-spacing: 6px;
+}
+
+window.dialog .buttons {
+  border-spacing: 12px;
+  margin-top: 11px;
+}
+
+/* Buttons: the responses and the drop-downs' own. */
+window.dialog button {
+  min-height: 24px;
+  min-width: 16px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 9px;
+  box-shadow: none;
+  text-shadow: none;
+  font-weight: bold;
+  background-image: none;
+  background-color: var(--dialog-button);
+  color: inherit;
+  outline: 0 solid transparent;
+  outline-offset: 4px;
+  transition: background 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-color 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-width 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-offset 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+window.dialog button:hover {
+  background-color: var(--dialog-button-hover);
+}
+
+window.dialog button:active {
+  background-color: var(--dialog-button-active);
+}
+
+window.dialog button:focus:focus-visible {
+  outline-color: var(--dialog-focus);
+  outline-width: 2px;
+  outline-offset: -2px;
+}
+
+window.dialog button:disabled {
+  filter: opacity(50%);
+}
+
+window.dialog dropdown > button > box {
+  border-spacing: 6px;
+}
+
+window.dialog button.response {
+  min-height: 24px;
+  min-width: 60px;
+  padding: 10px 20px;
+  border-radius: var(--dialog-button-radius);
+}
+
+/* The default response: opaque, in the accent; its focus ring outside it. */
+window.dialog button.response.suggested {
+  background-color: var(--dialog-accent-bg);
+  color: var(--dialog-accent-fg);
+}
+
+window.dialog button.response.suggested:hover {
+  background-image: image(color-mix(in srgb, currentColor 10%, transparent));
+}
+
+window.dialog button.response.suggested:active {
+  background-image: image(rgba(0, 0, 6, 0.2));
+}
+
+window.dialog button.response.suggested:focus:focus-visible {
+  outline-offset: 1px;
+}
+
+/* Entries, the password's with its peek icon. */
+window.dialog entry {
+  min-height: 34px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 9px;
+  border-spacing: 6px;
+  box-shadow: none;
+  background-image: none;
+  background-color: var(--dialog-button);
+  background-clip: padding-box;
+  color: inherit;
+  caret-color: currentColor;
+  outline: 0 solid transparent;
+  outline-offset: 4px;
+  transition: outline-color 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-width 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-offset 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+window.dialog entry:focus-within {
+  outline-color: var(--dialog-focus);
+  outline-width: 2px;
+  outline-offset: -2px;
+}
+
+window.dialog entry.error {
+  color: var(--dialog-error);
+}
+
+window.dialog entry.error:focus-within {
+  outline-color: color-mix(in srgb, var(--dialog-error) 50%, transparent);
+}
+
+window.dialog entry:disabled {
+  filter: opacity(50%);
+}
+
+window.dialog entry > text > placeholder {
+  color: inherit;
+  opacity: 55%;
+}
+
+window.dialog entry > text > selection {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+  color: transparent;
+}
+
+window.dialog entry > text > selection:focus-within {
+  background-color: color-mix(in srgb, var(--dialog-accent-bg) 30%, transparent);
+}
+
+window.dialog entry > image {
+  color: inherit;
+  opacity: 70%;
+}
+
+window.dialog entry > image:hover {
+  opacity: 100%;
+}
+
+window.dialog entry > image:active {
+  opacity: 80%;
+}
+
+window.dialog entry > image.left {
+  margin-right: 6px;
+}
+
+window.dialog entry > image.right {
+  margin-left: 6px;
+}
+
+/* The options' disclosure. */
+window.dialog expander-widget > box > title {
+  border-radius: 6px;
+  outline: 0 solid transparent;
+  outline-offset: 4px;
+}
+
+window.dialog expander-widget:focus:focus-visible > box > title {
+  outline-color: var(--dialog-focus);
+  outline-width: 2px;
+  outline-offset: -2px;
+}
+
+window.dialog expander-widget > box > title > expander {
+  min-width: 16px;
+  min-height: 16px;
+  opacity: 0.7;
+  -gtk-icon-source: -gtk-icontheme('pan-end-symbolic');
+}
+
+window.dialog expander-widget > box > title > expander:checked {
+  -gtk-icon-source: -gtk-icontheme('pan-down-symbolic');
+}
+
+window.dialog expander-widget > box > title:hover > expander,
+window.dialog expander-widget > box > title:active > expander {
+  opacity: 1;
+}
+
+/* The bar's popovers, as libadwaita's: opaque, in the theme's popover colours, outlined,
+   rounded at `popover-radius` (libadwaita's 15 px). */
+popover.item-popover > contents {
+  background-color: var(--popover-bg);
+  color: var(--popover-fg);
+  background-clip: padding-box;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: var(--popover-radius);
+  box-shadow: none;
+}
+
+/* Rows, as a menu's items. */
+popover.item-popover button.row {
+  border-radius: 9px;
+}
+
+popover.item-popover button.row:hover {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+popover.item-popover button.row:active {
+  background-color: color-mix(in srgb, currentColor 19%, transparent);
+}
+
+/* A row's round icon, as a circular button: the chosen one in the accent. */
+popover.item-popover .circle {
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+popover.item-popover .circle.chosen {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Switches. */
+popover.item-popover switch {
+  color: inherit;
+  border: none;
+  border-radius: 14px;
+  padding: 3px;
+  box-shadow: none;
+  background-image: none;
+  background-color: color-mix(in srgb, currentColor 15%, transparent);
+  outline: 0 solid transparent;
+  outline-offset: 5px;
+  transition: background 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-color 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-width 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              outline-offset 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+popover.item-popover switch:hover {
+  background-color: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+popover.item-popover switch:active {
+  background-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+popover.item-popover switch:focus:focus-visible {
+  outline-color: color-mix(in srgb, @accent_color 50%, transparent);
+  outline-width: 2px;
+  outline-offset: 1px;
+}
+
+popover.item-popover switch:disabled {
+  filter: opacity(50%);
+}
+
+popover.item-popover switch > slider {
+  min-width: 20px;
+  min-height: 20px;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  background-image: none;
+  background-color: color-mix(in srgb, white 80%, @view_bg_color);
+  box-shadow: 0 2px 4px rgba(0, 0, 6, 0.2);
+}
+
+popover.item-popover switch:hover > slider,
+popover.item-popover switch:active > slider,
+popover.item-popover switch:checked > slider {
+  background-color: white;
+}
+
+popover.item-popover switch:checked {
+  color: var(--accent-fg);
+  background-color: var(--accent);
+}
+
+popover.item-popover switch:checked:hover {
+  background-image: image(color-mix(in srgb, currentColor 10%, transparent));
+}
+
+popover.item-popover switch:checked:active {
+  background-image: image(rgba(0, 0, 6, 0.2));
+}
+
+/* Sliders. */
+popover.item-popover scale {
+  min-height: 10px;
+  min-width: 10px;
+  padding: 12px;
+}
+
+popover.item-popover scale > trough {
+  border: none;
+  border-radius: 99px;
+  box-shadow: none;
+  background-image: none;
+  background-color: color-mix(in srgb, currentColor 15%, transparent);
+  transition: background 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+popover.item-popover scale > trough > highlight {
+  border: none;
+  border-radius: 99px;
+  background-image: none;
+  background-color: var(--accent);
+  color: var(--accent-fg);
+  transition: background 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+popover.item-popover scale > trough > slider {
+  min-width: 20px;
+  min-height: 20px;
+  margin: -8px;
+  border: none;
+  border-radius: 100%;
+  background-image: none;
+  background-color: color-mix(in srgb, white 80%, @view_bg_color);
+  box-shadow: 0 0 0 1px rgba(0, 0, 6, 0.1), 0 2px 4px rgba(0, 0, 6, 0.2);
+}
+
+popover.item-popover scale:hover > trough,
+popover.item-popover scale:active > trough {
+  background-color: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+popover.item-popover scale:hover > trough > highlight,
+popover.item-popover scale:active > trough > highlight {
+  background-image: image(color-mix(in srgb, currentColor 10%, transparent));
+}
+
+popover.item-popover scale:hover > trough > slider,
+popover.item-popover scale:active > trough > slider {
+  background-color: white;
+}
+
+/* The disclosures (Bluetooth's, the network's). */
+popover.item-popover expander-widget > box > title {
+  border-radius: 6px;
+}
+
+popover.item-popover expander-widget > box > title > expander {
+  min-width: 16px;
+  min-height: 16px;
+  opacity: 0.7;
+  -gtk-icon-source: -gtk-icontheme('pan-end-symbolic');
+}
+
+popover.item-popover expander-widget > box > title > expander:checked {
+  -gtk-icon-source: -gtk-icontheme('pan-down-symbolic');
+}
+
+popover.item-popover expander-widget > box > title:hover > expander {
+  opacity: 1;
+}

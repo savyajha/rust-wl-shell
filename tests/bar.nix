@@ -43,8 +43,8 @@
 #      the built-in tint, the shell running; one with only a warning (`;;`) is applied,
 #      the warning logged; a symlink renamed over it (as home-manager
 #      does) is followed; removed, the built-in tint again
-#  14. a popover opens 6 px (popover-gap) from the bar, with no arrow, blurred within, its
-#      outline unbroken along its bar-facing edge, its button lit while it is open and not
+#  14. a popover opens 6 px (popover-gap) from the bar, with no arrow, opaque (its pixels
+#      the same over stripes and over grey), its outline unbroken along its bar-facing edge, its button lit while it is open and not
 #      after; from a bottom bar (a second shell) alike, upward
 
 {
@@ -487,11 +487,11 @@ pkgs.testers.runNixOSTest {
 
     def gap_and_outline(shot, x, ys):
         """Column `x` over `ys`, from the bar outward: niri's grey for the gap (6 px), one
-        row of outline (lighter than the tint), then the tint."""
+        row of outline (darker than the grey), then the popover's opaque background."""
         column = [pixel(shot, x, y) for y in ys]
         edge = column[6]
-        ok = all(is_grey(p) for p in column[:6]) and not is_grey(edge) and not is_tint(edge)
-        return ok and all(is_tint(p) for p in column[7:]), column
+        ok = all(is_grey(p) for p in column[:6]) and max(edge) < GREY - 8
+        return ok and all(is_popover(p) for p in column[7:]), column
 
     def outlined_from_bar(shot, x, ys):
         """The popover a gap from the bar, outlined across its bar-facing edge (under the
@@ -505,7 +505,7 @@ pkgs.testers.runNixOSTest {
         bar's tint."""
         return not is_tint(pixel(shot, first - 3, y))
 
-    with subtest("a popover opens a gap from the bar, blurred, outlined, its button lit"):
+    with subtest("a popover opens a gap from the bar, opaque, outlined, its button lit"):
         # A striped background (niri's grey would hide a blur).
         spawn("${pkgs.swaybg}/bin/swaybg -i ${stripes} -m tile")
         time.sleep(2)
@@ -520,12 +520,12 @@ pkgs.testers.runNixOSTest {
         machine.send_monitor_command(f"screendump {machine.out_dir}/popover.ppm gpu 0")
         machine.send_key("esc")
         retry(lambda _: keyboard_free(), 10)
-        # Inside it, near its bar-facing edge, the stripes are smoothed.
-        def spread(shot):
-            values = [sum(pixel(shot, x + dx, HEIGHT + 12)) for dx in range(-6, 7)]
-            return max(values) - min(values)
-        assert spread(before) > 300 and spread(after) < spread(before) // 3, (
-            spread(before), spread(after))
+        # Opaque, as GNOME apps' popovers: inside it, near its bar-facing edge, its own
+        # background over the stripes, and the same pixels over niri's grey (below).
+        inside = [(x + dx, HEIGHT + 12) for dx in range(-6, 7)]
+        assert len({pixel(before, *p) for p in inside}) > 1, "no stripes under it"
+        over_stripes = [pixel(after, *p) for p in inside]
+        assert all(is_popover(p) for p in over_stripes), over_stripes
         machine.succeed("pkill swaybg")
         # On niri's grey: the gap, the outline, and the button lit while it is open only.
         time.sleep(1)
@@ -534,6 +534,7 @@ pkgs.testers.runNixOSTest {
         move(100, 700)
         time.sleep(0.5)
         shot = screen()
+        assert [pixel(shot, *p) for p in inside] == over_stripes, "not opaque"
         outlined_from_bar(shot, x, range(HEIGHT, HEIGHT + 12))
         assert lit(shot, first, HEIGHT // 2), "not lit while open"
         machine.send_key("esc")

@@ -35,9 +35,8 @@ struct Shell {
     banners: Rc<RefCell<Banners>>,
     dialog: Rc<Dialog>,
     osd: Option<Osd>,
-    /// The bars' blur, and their popovers' (none with `niri-blur-rule`).
+    /// The bars' blur.
     blur: Option<Rc<Blur>>,
-    popover_blur: Option<Rc<Blur>>,
     bars: Vec<(gdk::Monitor, Controller<Bar>)>,
     /// The last update of each kind, for bars added later.
     latest: Vec<Update>,
@@ -68,9 +67,8 @@ pub fn start(
         notifications,
         power,
     } = core;
-    let radii = (config.popover_radius as i32, config.panel_radius as i32);
-    let blur = Blur::new(display, radii).map(Rc::new);
-    // The dialog, the banners, the OSD and the popovers: blurred by the shell (its region's corners in
+    let blur = Blur::new(display, config.panel_radius as i32).map(Rc::new);
+    // The banners and the OSD: blurred by the shell (its region's corners in
     // whole pixels), or by niri's layer rule, which rounds them smoothly (README).
     let layer_blur = blur.clone().filter(|_| !config.niri_blur_rule);
     let shell = Rc::new(RefCell::new(Shell {
@@ -78,7 +76,7 @@ pub fn start(
         profiles,
         audio,
         brightness,
-        dialog: Dialog::new(network.clone(), answers, power.clone(), &layer_blur),
+        dialog: Dialog::new(network.clone(), answers, power.clone()),
         network,
         bluetooth,
         night_light,
@@ -91,7 +89,6 @@ pub fn start(
         notifications,
         power,
         osd: config.osd.then(|| Osd::new(&config, &layer_blur)),
-        popover_blur: layer_blur,
         config: Rc::new(config),
         blur,
         bars: Vec::new(),
@@ -153,7 +150,6 @@ impl Shell {
                 power: self.power.clone(),
                 banners: self.banners.clone(),
                 dialog: self.dialog.clone(),
-                blur: self.popover_blur.clone(),
             })
             .detach();
         Blur::attach(&self.blur, bar.widget(), Corners::Square);
