@@ -8,12 +8,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::{self as gtk, glib, prelude::*};
-use shell_core::config::Sizes;
+use shell_core::config::Config;
 use shell_core::niri::{self, Workspace};
 use tokio::sync::mpsc::UnboundedSender;
-
-/// A switch's length, in µs (vibepanel's).
-const DURATION: f64 = 200_000.0;
 
 pub struct Workspaces {
     pub row: gtk::Box,
@@ -22,6 +19,8 @@ pub struct Workspaces {
     size: i32,
     active: i32,
     gap: i32,
+    /// A switch's length, in µs (`workspace-animation`).
+    duration: f64,
     state: Rc<RefCell<State>>,
 }
 
@@ -44,15 +43,15 @@ struct Pill {
 }
 
 impl Workspaces {
-    pub fn new(niri: UnboundedSender<niri::Command>, sizes: Sizes) -> Self {
-        let size = sizes.icon as i32;
+    pub fn new(niri: UnboundedSender<niri::Command>, config: &Config) -> Self {
+        let sizes = config.sizes();
         Self {
             row: gtk::Box::new(gtk::Orientation::Horizontal, 0),
             niri,
-            size,
-            // vibepanel's, on the owner's 30 px bar: 16 px pills, 22 px wide when shown.
-            active: (size * 11 + 4) / 8,
-            gap: (sizes.spacing * 3 / 4) as i32,
+            size: sizes.pill as i32,
+            active: sizes.active_pill as i32,
+            gap: sizes.pill_gap as i32,
+            duration: f64::from(config.workspace_animation) * 1000.0,
             state: Rc::default(),
         }
     }
@@ -120,9 +119,11 @@ impl Workspaces {
             state.ticking = true;
             // The row is the callback's argument, not held by it: a row destroyed while
             // it animates is freed, its callback with it.
-            let (state, gap, size) = (self.state.clone(), self.gap, self.size);
+            let (state, gap, size, duration) =
+                (self.state.clone(), self.gap, self.size, self.duration);
             self.row.add_tick_callback(move |row, clock| {
-                tick(row, &mut state.borrow_mut(), clock.frame_time(), gap, size)
+                let frame = clock.frame_time();
+                tick(row, &mut state.borrow_mut(), frame, duration, (gap, size))
             });
         }
     }
@@ -154,9 +155,16 @@ impl Workspaces {
 }
 
 /// One frame of the animation; the pills removed go once it ends.
-fn tick(row: &gtk::Box, state: &mut State, frame: i64, gap: i32, size: i32) -> glib::ControlFlow {
+/// The gap and the pill's size, as `lay_out` takes them, come last.
+fn tick(
+    row: &gtk::Box,
+    state: &mut State,
+    frame: i64,
+    duration: f64,
+    (gap, size): (i32, i32),
+) -> glib::ControlFlow {
     let start = *state.start.get_or_insert(frame);
-    let t = ((frame - start) as f64 / DURATION).min(1.0);
+    let t = ((frame - start) as f64 / duration).min(1.0);
     for pill in &mut state.pills {
         pill.now = pill.from + (pill.to - pill.from) * t;
     }

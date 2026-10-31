@@ -252,7 +252,12 @@ impl VpnItem {
         }
         self.shown.replace(vpns.clone());
         let on = vpns.iter().filter(|v| v.state != VpnState::Off).count();
-        self.icon.set_opacity(if on > 0 { 1.0 } else { 0.5 });
+        // Dimmed while off (style.css).
+        if on > 0 {
+            self.icon.remove_css_class("off");
+        } else {
+            self.icon.add_css_class("off");
+        }
         let label = if on > 0 { "VPN: on" } else { "VPN: off" };
         self.item
             .button

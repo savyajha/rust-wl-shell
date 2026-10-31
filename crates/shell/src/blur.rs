@@ -27,12 +27,24 @@ pub struct Blur {
     qh: QueueHandle<Capabilities>,
     manager: ExtBackgroundEffectManagerV1,
     compositor: WlCompositor,
+    /// The popovers' corners' radius, and the dialog's and the banners' (the config's).
+    radii: (i32, i32),
+}
+
+/// A surface's corners, which its blur follows.
+pub enum Corners {
+    Square,
+    Popover,
+    /// The dialog's and the banners'.
+    Panel,
+    /// Rounded at half its height.
+    Pill,
 }
 
 type Effect = ExtBackgroundEffectSurfaceV1;
 
 impl Blur {
-    pub fn new(display: &gdk::Display) -> Option<Self> {
+    pub fn new(display: &gdk::Display, radii: (i32, i32)) -> Option<Self> {
         let version = (
             gtk::major_version(),
             gtk::minor_version(),
@@ -42,7 +54,7 @@ impl Blur {
             info!("no blur: GTK's own background effect (GTK ≥ 4.23.3) is not supported yet");
             return None;
         }
-        Self::connect(display).unwrap_or_else(|e| {
+        Self::connect(display, radii).unwrap_or_else(|e| {
             warn!("no blur: {e:#}");
             None
         })
@@ -50,7 +62,7 @@ impl Blur {
 
     /// Without the protocol or its blur, `None` (logged here, as both are the compositor's
     /// choice, not an error).
-    fn connect(display: &gdk::Display) -> anyhow::Result<Option<Self>> {
+    fn connect(display: &gdk::Display, radii: (i32, i32)) -> anyhow::Result<Option<Self>> {
         let display = display
             .downcast_ref::<WaylandDisplay>()
             .and_then(|d| d.wl_display())
@@ -78,19 +90,25 @@ impl Blur {
             qh,
             manager,
             compositor,
+            radii,
         }))
     }
 
     /// Blur behind `native` (a bar's window, a popover, the OSD) while it is mapped: all of
-    /// it, but for corners rounded at `radius` (at most half its height), following its
-    /// size.
+    /// it, but for its `corners` (rounded at most at half its height), following its size.
     pub fn attach(
         blur: &Option<Rc<Blur>>,
         native: &(impl IsA<gtk::Native> + IsA<gtk::Widget>),
-        radius: i32,
+        corners: Corners,
     ) {
         let Some(blur) = blur.clone() else {
             return;
+        };
+        let radius = match corners {
+            Corners::Square => 0,
+            Corners::Popover => blur.radii.0,
+            Corners::Panel => blur.radii.1,
+            Corners::Pill => i32::MAX,
         };
         let effect: Rc<RefCell<Option<Effect>>> = Rc::default();
         // A rounded region follows the surface's layout (its size, and a popover's place,

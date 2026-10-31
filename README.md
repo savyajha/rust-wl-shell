@@ -56,6 +56,18 @@ backlight "amdgpu_bl1"
 | `font-size` | 13 at 24 | The text's size in pixels. |
 | `icon-size` | 16 at 24 | Icons' size in pixels. |
 | `spacing` | 8 at 24 | The space between items and at the bar's ends, in pixels. |
+| `pill-size` | the icon size | A workspace's pill's height and width, at most the height. |
+| `active-pill-width` | 11/8 of the pill | The shown workspace's pill's width. |
+| `pill-gap` | 3/4 of the spacing | The space between workspaces' pills. |
+| `workspace-animation` | `200` | A workspace switch's animation, in ms. |
+| `popover-radius` | `10` | The popovers' corners' radius (the blur behind them follows it). |
+| `panel-radius` | `14` | The dialog's and the banners' corners' radius (and their blur's). |
+| `history-height` | `480` | The notifications' history's height before it scrolls. |
+| `osd-margin` | `48` | The OSD's distance from the output's bottom edge. |
+| `osd-timeout` | `1500` | How long the OSD shows after the last change, in ms. |
+| `notification-gap` | `8` | The banners' distance from the output's edges and from each other. |
+| `notification-width` | `360` | The banners' width. |
+| `swipe-distance` | `100` | How far a notification is swiped before it is dismissed. |
 | `clock-format` | `"%a %-d %b %H:%M"` | The clock, as a [chrono strftime](https://docs.rs/chrono/latest/chrono/format/strftime/index.html) format (`Mon 27 Oct 09:41`). |
 | `position` | `"top"` | `"top"`, or `"bottom"` to run it next to another bar at the top. |
 | `workspaces` | `true` | Show the output's workspaces: a pill (of the icon size) for each with windows and for the one shown, which is wider and filled with the accent; a click switches to it. |
@@ -83,7 +95,9 @@ backlight "amdgpu_bl1"
 | `backlight` | the first | The backlight device to follow, by its name in `/sys/class/backlight`. |
 
 The three sizes follow the height unless set, in macOS's proportions at 24 px; each must be
-at most the height. The clock is redrawn on each minute and after a resume from sleep.
+at most the height. The keys hold only what CSS cannot reach (the bar's height, which is
+its exclusive zone, layer-shell margins, the sizes the shell animates, the radii its blur
+follows, and timings); the rest of the look is in the stylesheet (below). The clock is redrawn on each minute and after a resume from sleep.
 `dot-size` is gone: the workspaces' pills follow `icon-size`, and a config that sets it
 fails `--check`.
 
@@ -134,10 +148,39 @@ The OSD, a pill near the bottom of the focused output, shows the volume or brigh
 for 1.5 s when it changes from outside the shell (the keys, wpctl, brightnessctl), not
 when the shell's own slider moves it.
 
-The text is in the system font (GTK's `gtk-font-name`, from GSettings). The look is fixed
-for now: a translucent dark tint, white text, and the compositor's blur behind it, which
-needs niri's `ext-background-effect-v1` (a `layer-rule` for the namespace
-`rust-wl-shell` can set its options).
+The text is in the system font (GTK's `gtk-font-name`, from GSettings). The look is a
+translucent dark tint, white text, and the compositor's blur behind it, which needs
+niri's `ext-background-effect-v1` (a `layer-rule` for the namespace `rust-wl-shell` can
+set its options).
+
+### Stylesheet
+
+The built-in stylesheet, [`style.css`](crates/shell/src/style.css), defines every colour,
+spacing, radius and width once, as a variable in its `window { }` rule, and its rules use
+them. A stylesheet of your own, `$XDG_CONFIG_HOME/rust-wl-shell/style.css`
+(`~/.config/rust-wl-shell/style.css`), is loaded after it, at GTK's user priority, and
+again whenever it changes (replaced as a symlink too). Overriding a variable is enough:
+
+```css
+window {
+  --accent: #e01b24;
+  --tint: rgba(0, 0, 0, 0.5);
+  --radius-s: 4px;
+}
+```
+
+A file GTK cannot parse in full is left out, its errors logged, and the built-in look
+stays; one with only warnings (an empty declaration, `;;`) is applied, its warnings
+logged. The accent defaults to GTK's (`@accent_bg_color`, which a gtk.css can set).
+
+Do not override `--popover-radius`, `--panel-radius` or `--radius-pill` in the
+stylesheet: the shell's blur follows the config's radii, not the CSS, so its corners
+would no longer match. Set the radii with the config's `popover-radius` and
+`panel-radius`, and leave `--radius-pill` round.
+
+The shell watches the name `style.css` in its directory: it sees the file written,
+replaced, or renamed over (home-manager's symlink), but not an edit to the file a
+symlink there points to elsewhere.
 
 The shell's blur is clipped in whole logical pixels, so at a fractional scale its rounded
 corners show steps past the drawn ones. niri can round the blur itself, but only when
@@ -174,6 +217,14 @@ The flake has a home-manager module, `homeManagerModules.default`:
     };
   };
 }
+```
+
+`style` holds a stylesheet (CSS lines), written to `~/.config/rust-wl-shell/style.css`:
+
+```nix
+programs.rust-wl-shell.style = ''
+  window { --accent: #e01b24; }
+'';
 ```
 
 `settings` holds the config's keys; the config is checked with `--check` when the

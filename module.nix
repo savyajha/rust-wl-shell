@@ -59,10 +59,22 @@ in
         and the OSD to a niri `layer-rule`, which rounds its corners smoothly (README.md).
       '';
     };
+    style = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+      example = "window { --accent: #e01b24; --tint: rgba(0, 0, 0, 0.5); }";
+      description = ''
+        A stylesheet over the built-in one, written to
+        `$XDG_CONFIG_HOME/rust-wl-shell/style.css`: overriding the built-in one's
+        variables (README.md) is enough. A file GTK cannot parse leaves the built-in look.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
+    # The shell follows the file, so a switch restyles it without a restart.
+    xdg.configFile."rust-wl-shell/style.css" = lib.mkIf (cfg.style != "") { text = cfg.style; };
     # After niri, as it is ready before the session's target is reached. Neither GDK_DEBUG
     # nor GSK_RENDERER is set here: the shell sets up its own GTK start-up (DESIGN.md).
     systemd.user.services.rust-wl-shell = {

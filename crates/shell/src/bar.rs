@@ -139,10 +139,11 @@ impl Component for Bar {
             monitor: init.monitor.clone(),
             all: Vec::new(),
             workspaces: Vec::new(),
-            switcher: Workspaces::new(init.niri.clone(), config.sizes()),
+            switcher: Workspaces::new(init.niri.clone(), config),
             app: String::new(),
             power: (config.power).then(|| PowerItem::new(init.power.clone(), &init.blur)),
             clock: ClockItem::new(
+                config,
                 config.notifications.then(|| init.notifications.clone()),
                 init.banners.clone(),
                 &init.blur,

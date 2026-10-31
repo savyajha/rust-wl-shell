@@ -40,7 +40,8 @@ impl BatteryItem {
         profiles: Option<UnboundedSender<String>>,
         blur: &Option<Rc<Blur>>,
     ) -> Self {
-        let face = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let face = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        face.add_css_class("face");
         let (icon, percent) = (gtk::Image::new(), gtk::Label::new(None));
         percent.set_visible(show_percent);
         face.append(&icon);

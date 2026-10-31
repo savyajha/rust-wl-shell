@@ -17,7 +17,7 @@ use shell_core::network::{self, Eap, Joined, Request, Secret, Security};
 use shell_core::power::{self, Action};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
+use crate::blur::{Blur, Corners};
 
 pub struct Dialog {
     window: gtk::Window,
@@ -90,7 +90,8 @@ impl Dialog {
         ] {
             entry.update_property(&[gtk::accessible::Property::Label(name)]);
         }
-        let options_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let options_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        options_box.add_css_class("options");
         for (name, widget) in [
             ("Method", method.upcast_ref::<gtk::Widget>()),
             ("Inner method", inner.upcast_ref()),
@@ -113,12 +114,12 @@ impl Dialog {
             .build();
         let buttons = gtk::Box::builder()
             .homogeneous(true)
-            .spacing(12)
             .css_classes(["buttons"])
             .build();
         buttons.append(&cancel);
         buttons.append(&join);
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("content");
         for widget in [
             heading.upcast_ref::<gtk::Widget>(),
             body.upcast_ref(),
@@ -131,7 +132,7 @@ impl Dialog {
             content.append(widget);
         }
         window.set_child(Some(&content));
-        Blur::attach(blur, &window, 14);
+        Blur::attach(blur, &window, Corners::Panel);
         let dialog = Rc::new(Self {
             window,
             heading,

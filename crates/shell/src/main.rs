@@ -16,6 +16,7 @@ mod popover;
 mod power;
 mod shell;
 mod sliders;
+mod style;
 mod toggles;
 mod workspaces;
 
@@ -28,7 +29,7 @@ use std::time::Instant;
 
 use anyhow::{Context, bail};
 use gtk4::{self as gtk, gdk, glib};
-use shell_core::config::{Config, Sizes};
+use shell_core::config::Config;
 use tracing::{error, info};
 use tracing_subscriber::filter::LevelFilter;
 
@@ -95,13 +96,8 @@ fn run(marks: Marks, path: Option<PathBuf>) -> anyhow::Result<()> {
     init_gtk()?;
     marks.log("gtk_init");
     let display = gdk::Display::default().context("no display")?;
-    let css = gtk::CssProvider::new();
-    css.load_from_string(&stylesheet(config.sizes()));
-    gtk::style_context_add_provider_for_display(
-        &display,
-        &css,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    // Kept while the shell runs: it follows the user's stylesheet.
+    let _style = style::load(&display, &config);
     // The shell's own icons (keep awake's cup), installed by Nix, else in the source tree.
     let icons = option_env!("RUST_WL_SHELL_ICONS");
     let icons = icons.unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/icons"));
@@ -144,21 +140,6 @@ fn init_gtk() -> anyhow::Result<()> {
         }
     }
     init.context("starting GTK")
-}
-
-/// The fixed stylesheet, after the variables it takes its sizes from.
-fn stylesheet(sizes: Sizes) -> String {
-    let Sizes {
-        height,
-        font,
-        icon,
-        spacing,
-    } = sizes;
-    format!(
-        "window.bar, window.osd {{ --height: {height}px; --font-size: {font}px; \
-         --icon-size: {icon}px; --spacing: {spacing}px; }}\n{}",
-        include_str!("style.css")
-    )
 }
 
 #[cfg(test)]

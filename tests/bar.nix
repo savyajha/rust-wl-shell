@@ -38,6 +38,11 @@
 #      No backlight in the VM: no brightness item.
 #  13. the OSD shows on the focused output; with that output switched off, on another
 #  15. no wlsunset unit: no night light item
+#  16. a user stylesheet (~/.config/rust-wl-shell/style.css) setting the tint's variable
+#      tints the bar red; rewritten, blue; one that does not parse is logged and leaves
+#      the built-in tint, the shell running; one with only a warning (`;;`) is applied,
+#      the warning logged; a symlink renamed over it (as home-manager
+#      does) is followed; removed, the built-in tint again
 #  14. a popover's arrow points at its item: drawn, blurred within, and not beside it;
 #      from a bottom bar (a second shell), no line across its base
 
@@ -198,6 +203,38 @@ pkgs.testers.runNixOSTest {
         tinted = [y for y, p in enumerate(column) if is_tint(p)]
         assert tinted == list(range(HEIGHT)), column
         assert all(is_grey(p) for p in column[HEIGHT:]), column
+
+    with subtest("a user stylesheet restyles the bar, and is followed"):
+        css = "/home/${user}/.config/rust-wl-shell/style.css"
+        as_user("mkdir -p /home/${user}/.config/rust-wl-shell")
+
+        def write(text, path=css):
+            machine.succeed(f"cat > {path}.new <<'EOF'\n{text}\nEOF\nmv {path}.new {path}")
+
+        def bar_is(check, what):
+            column = lambda: [pixel(screen(), 512, y) for y in range(2, HEIGHT - 2)]
+            with machine.nested(f"waiting for the bar {what}"):
+                retry(lambda _: all(check(p) for p in column()), 30)
+
+        write("window { --tint: rgba(200, 0, 0, 0.5); }")
+        bar_is(lambda p: p[0] > p[2] + 60, "red")
+        write("window { --tint: rgba(0, 0, 200, 0.5); }")
+        bar_is(lambda p: p[2] > p[0] + 60, "blue")
+        write("window { --tint: rgba(0, 200, 0, 0.5); } @@@ {")
+        bar_is(is_tint, "tinted as built in, the broken stylesheet left out")
+        machine.wait_until_succeeds(f"{LOG} | grep -q 'the built-in look stays'", timeout=10)
+        restarts = as_user("systemctl --user show -p NRestarts --value rust-wl-shell").strip()
+        assert restarts == "0", f"the shell restarted {restarts} times"
+        # A warning (an empty declaration) is logged; the rest stays applied.
+        write("window { --tint: rgba(0, 0, 200, 0.5);; }")
+        bar_is(lambda p: p[2] > p[0] + 60, "blue, despite a warning")
+        machine.wait_until_succeeds(f"{LOG} | grep -q 'Empty declaration'", timeout=10)
+        # As home-manager replaces it: a symlink renamed over it.
+        write("window { --tint: rgba(200, 0, 0, 0.5); }", "/home/${user}/linked.css")
+        machine.succeed(f"ln -s /home/${user}/linked.css {css}.link && mv -T {css}.link {css}")
+        bar_is(lambda p: p[0] > p[2] + 60, "red, from the symlink")
+        machine.succeed(f"rm {css}")
+        bar_is(is_tint, "tinted as built in again")
 
     with subtest("the workspaces: a pill for each with windows, and the one shown"):
         # The shown one alone, empty: one pill, blue.

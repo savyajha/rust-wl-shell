@@ -21,6 +21,39 @@ pub struct Config {
     pub icon_size: Option<u32>,
     #[knuffel(child, unwrap(argument))]
     pub spacing: Option<u32>,
+    /// A workspace's pill: its height and width, the shown one's width, and the gap
+    /// between pills (KDL, not CSS: the shell animates them).
+    #[knuffel(child, unwrap(argument))]
+    pub pill_size: Option<u32>,
+    #[knuffel(child, unwrap(argument))]
+    pub active_pill_width: Option<u32>,
+    #[knuffel(child, unwrap(argument))]
+    pub pill_gap: Option<u32>,
+    /// The corners' radii of the popovers, and of the dialog and the banners (KDL, not CSS:
+    /// the blur behind them follows them too).
+    #[knuffel(child, unwrap(argument), default = 10)]
+    pub popover_radius: u32,
+    #[knuffel(child, unwrap(argument), default = 14)]
+    pub panel_radius: u32,
+    /// The notifications' history's height before it scrolls.
+    #[knuffel(child, unwrap(argument), default = 480)]
+    pub history_height: u32,
+    /// The OSD's distance from the bottom edge, and how long it shows, in ms.
+    #[knuffel(child, unwrap(argument), default = 48)]
+    pub osd_margin: u32,
+    #[knuffel(child, unwrap(argument), default = 1500)]
+    pub osd_timeout: u32,
+    /// The banners' distance from the output's edges and from each other, and their width.
+    #[knuffel(child, unwrap(argument), default = 8)]
+    pub notification_gap: u32,
+    #[knuffel(child, unwrap(argument), default = 360)]
+    pub notification_width: u32,
+    /// How far a swipe goes before it dismisses a notification.
+    #[knuffel(child, unwrap(argument), default = 100)]
+    pub swipe_distance: u32,
+    /// A workspace switch's animation, in ms.
+    #[knuffel(child, unwrap(argument), default = 200)]
+    pub workspace_animation: u32,
     /// A strftime format, as chrono reads it.
     #[knuffel(child, unwrap(argument), default = DEFAULT_CLOCK_FORMAT.into())]
     pub clock_format: String,
@@ -119,6 +152,9 @@ pub struct Sizes {
     pub font: u32,
     pub icon: u32,
     pub spacing: u32,
+    pub pill: u32,
+    pub active_pill: u32,
+    pub pill_gap: u32,
 }
 
 impl Config {
@@ -143,11 +179,32 @@ impl Config {
             ("font-size", sizes.font),
             ("icon-size", sizes.icon),
             ("spacing", sizes.spacing),
+            ("pill-size", sizes.pill),
         ] {
             ensure!(
                 (1..=config.height).contains(&size),
                 "{key} must be 1 to the height ({})",
                 config.height
+            );
+        }
+        for (key, value, range) in [
+            ("active-pill-width", sizes.active_pill, 1..=256),
+            ("pill-gap", sizes.pill_gap, 0..=64),
+            ("popover-radius", config.popover_radius, 0..=64),
+            ("panel-radius", config.panel_radius, 0..=64),
+            ("history-height", config.history_height, 100..=4000),
+            ("osd-margin", config.osd_margin, 0..=1000),
+            ("osd-timeout", config.osd_timeout, 100..=60_000),
+            ("notification-gap", config.notification_gap, 0..=200),
+            ("notification-width", config.notification_width, 100..=2000),
+            ("swipe-distance", config.swipe_distance, 10..=1000),
+            ("workspace-animation", config.workspace_animation, 1..=2000),
+        ] {
+            ensure!(
+                range.contains(&value),
+                "{key} must be {} to {}",
+                range.start(),
+                range.end()
             );
         }
         let path = config
@@ -164,14 +221,22 @@ impl Config {
     }
 
     /// The sizes: those set, else macOS's proportions at 24 px (text 13, icons 16, spacing
-    /// 8) scaled to the height.
+    /// 8) scaled to the height; a pill the icon's size, 11/8 of it wide when shown, with
+    /// 3/4 of the spacing between pills.
     pub fn sizes(&self) -> Sizes {
         let scaled = |at_24: u32| (self.height * at_24 + 12) / 24;
+        let icon = self.icon_size.unwrap_or_else(|| scaled(16));
+        let spacing = self.spacing.unwrap_or_else(|| scaled(8));
+        let pill = self.pill_size.unwrap_or(icon);
         Sizes {
             height: self.height,
             font: self.font_size.unwrap_or_else(|| scaled(13)),
-            icon: self.icon_size.unwrap_or_else(|| scaled(16)),
-            spacing: self.spacing.unwrap_or_else(|| scaled(8)),
+            icon,
+            spacing,
+            pill,
+            // vibepanel's, on the owner's 30 px bar: 16 px pills, 22 px wide when shown.
+            active_pill: self.active_pill_width.unwrap_or((pill * 11 + 4) / 8),
+            pill_gap: self.pill_gap.unwrap_or(spacing * 3 / 4),
         }
     }
 }
@@ -211,8 +276,22 @@ mod tests {
             font: 13,
             icon: 16,
             spacing: 8,
+            pill: 16,
+            active_pill: 22,
+            pill_gap: 6,
         };
         assert_eq!(config.sizes(), sizes);
+        assert_eq!((config.popover_radius, config.panel_radius), (10, 14));
+        assert_eq!((config.osd_margin, config.osd_timeout), (48, 1500));
+        assert_eq!(
+            (config.notification_gap, config.notification_width),
+            (8, 360)
+        );
+        assert_eq!(
+            (config.swipe_distance, config.workspace_animation),
+            (100, 200)
+        );
+        assert_eq!(config.history_height, 480);
     }
 
     #[test]
@@ -223,6 +302,9 @@ mod tests {
             font: 16,
             icon: 20,
             spacing: 10,
+            pill: 20,
+            active_pill: 28,
+            pill_gap: 7,
         };
         assert_eq!(config.sizes(), sizes);
     }
@@ -234,6 +316,18 @@ mod tests {
             font-size 14
             icon-size 18
             spacing 6
+            pill-size 12
+            active-pill-width 20
+            pill-gap 4
+            popover-radius 8
+            panel-radius 12
+            history-height 600
+            osd-margin 64
+            osd-timeout 2000
+            notification-gap 10
+            notification-width 400
+            swipe-distance 80
+            workspace-animation 300
             clock-format "%A, %-d %b %H:%M"
             position "bottom"
             workspaces false
@@ -268,6 +362,18 @@ mod tests {
                 font_size: Some(14),
                 icon_size: Some(18),
                 spacing: Some(6),
+                pill_size: Some(12),
+                active_pill_width: Some(20),
+                pill_gap: Some(4),
+                popover_radius: 8,
+                panel_radius: 12,
+                history_height: 600,
+                osd_margin: 64,
+                osd_timeout: 2000,
+                notification_gap: 10,
+                notification_width: 400,
+                swipe_distance: 80,
+                workspace_animation: 300,
                 clock_format: "%A, %-d %b %H:%M".into(),
                 position: Position::Bottom,
                 workspaces: false,
@@ -310,6 +416,15 @@ mod tests {
             ("height 65", "height must be 16 to 64"),
             ("height -1", "invalid value"),
             ("font-size 0", "font-size must be 1 to the height (24)"),
+            ("pill-size 25", "pill-size must be 1 to the height (24)"),
+            ("active-pill-width 0", "active-pill-width must be 1 to 256"),
+            ("popover-radius 65", "popover-radius must be 0 to 64"),
+            ("osd-timeout 50", "osd-timeout must be 100 to 60000"),
+            (
+                "workspace-animation 0",
+                "workspace-animation must be 1 to 2000",
+            ),
+            ("swipe-distance -1", "invalid value"),
             (
                 "height 20\nspacing 21",
                 "spacing must be 1 to the height (20)",

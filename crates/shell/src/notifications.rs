@@ -9,23 +9,21 @@ use std::time::{Duration, Instant};
 
 use gtk4::{self as gtk, gdk, gio, glib, pango, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
-use shell_core::config::Corner;
+use shell_core::config::{Config, Corner};
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::Blur;
-
-/// How far a swipe goes before it dismisses.
-const SWIPE: f64 = 100.0;
-/// From the output's edges, and between banners.
-const GAP: i32 = 8;
-const WIDTH: i32 = 360;
+use crate::blur::{Blur, Corners};
 
 /// A banner's pending timeout, if it has one.
 type Timer = Rc<RefCell<Option<glib::SourceId>>>;
 
 pub struct Banners {
     corner: Corner,
+    /// From the output's edges and between banners; their width; a swipe's distance.
+    gap: i32,
+    width: i32,
+    swipe: f64,
     requests: UnboundedSender<Request>,
     blur: Option<Rc<Blur>>,
     /// Newest first, as shown, each with its timer.
@@ -36,9 +34,16 @@ pub struct Banners {
 }
 
 impl Banners {
-    pub fn new(corner: Corner, requests: UnboundedSender<Request>, blur: Option<Rc<Blur>>) -> Self {
+    pub fn new(
+        config: &Config,
+        requests: UnboundedSender<Request>,
+        blur: Option<Rc<Blur>>,
+    ) -> Self {
         Self {
-            corner,
+            corner: config.notification_position,
+            gap: config.notification_gap as i32,
+            width: config.notification_width as i32,
+            swipe: f64::from(config.swipe_distance),
             requests,
             blur,
             shown: Vec::new(),
@@ -81,18 +86,18 @@ impl Banners {
             Corner::TopLeft | Corner::Top | Corner::TopRight => Edge::Top,
             _ => Edge::Bottom,
         };
-        let mut offset = GAP;
+        let mut offset = self.gap;
         for (_, window, _) in &self.shown {
             window.set_margin(vertical, offset);
-            let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, WIDTH);
-            offset += height + GAP;
+            let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, self.width);
+            offset += height + self.gap;
         }
     }
 
     fn banner(&self, n: &Notification, monitor: Option<&gdk::Monitor>) -> (gtk::Window, Timer) {
         let window = gtk::Window::builder()
             .css_classes(["notification"])
-            .default_width(WIDTH)
+            .default_width(self.width)
             .build();
         window.init_layer_shell();
         window.set_namespace(Some("rust-wl-shell-notification"));
@@ -110,7 +115,7 @@ impl Banners {
         window.set_anchor(vertical, true);
         if let Some(edge) = horizontal {
             window.set_anchor(edge, true);
-            window.set_margin(edge, GAP);
+            window.set_margin(edge, self.gap);
         }
         let requests = self.requests.clone();
         let id = n.id;
@@ -118,7 +123,6 @@ impl Banners {
         let buttons = n.actions.iter().filter(|(key, _)| key != "default").take(3);
         let row = gtk::Box::builder()
             .homogeneous(true)
-            .spacing(6)
             .css_classes(["actions"])
             .build();
         for (key, label) in buttons {
@@ -132,20 +136,21 @@ impl Banners {
         }
         window.set_child(Some(&card));
         // The banner follows a swipe sideways, as far as its anchored edge lets it.
+        let (gap, swiped) = (self.gap, self.swipe);
         let moved = glib::clone!(
             #[weak]
             window,
             move |dx: f64| {
-                window.set_opacity(1.0 - (dx.abs() / (2.0 * SWIPE)).min(0.8));
+                window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(0.8));
                 match horizontal {
-                    Some(Edge::Right) => window.set_margin(Edge::Right, GAP - dx as i32),
-                    Some(edge) => window.set_margin(edge, GAP + dx as i32),
+                    Some(Edge::Right) => window.set_margin(Edge::Right, gap - dx as i32),
+                    Some(edge) => window.set_margin(edge, gap + dx as i32),
                     None => {}
                 }
             }
         );
         let dismissed = requests.clone();
-        swipe(&card, horizontal.is_some(), moved, move || {
+        swipe(&card, self.swipe, horizontal.is_some(), moved, move || {
             let _ = dismissed.send(Request::Dismiss(id));
         });
         if n.actions.iter().any(|(key, _)| key == "default") {
@@ -162,7 +167,7 @@ impl Banners {
             Some(timeout) => expire(&card, &window, timeout, requests, id),
             None => Timer::default(),
         };
-        Blur::attach(&self.blur, &window, 14);
+        Blur::attach(&self.blur, &window, Corners::Panel);
         window.set_visible(!self.hidden);
         (window, timer)
     }
@@ -244,9 +249,10 @@ pub fn act(
 /// A notification's card: its app's icon and name with × after them, then its image (if
 /// sent), summary and body.
 pub fn content(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Box {
-    let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
     card.add_css_class("card");
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    header.add_css_class("header");
     if !n.icon.is_empty() {
         // A URI's path decoded ("%20"), else a path or an icon's name.
         let path = match n.icon.starts_with("file://") {
@@ -278,7 +284,8 @@ pub fn content(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Box
     });
     header.append(&close);
     card.append(&header);
-    let main = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let main = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    main.add_css_class("main");
     if let Some(image) = &n.image {
         let format = match image.alpha {
             true => gdk::MemoryFormat::R8g8b8a8,
@@ -293,10 +300,11 @@ pub fn content(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Box
             image.rowstride as usize,
         );
         let picture = gtk::Image::from_paintable(Some(&texture));
-        picture.set_pixel_size(40);
+        picture.add_css_class("picture");
         main.append(&picture);
     }
-    let text = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    text.add_css_class("text");
     let summary = gtk::Label::builder()
         .label(&n.summary)
         .xalign(0.0)
@@ -320,9 +328,10 @@ pub fn content(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Box
 
 /// A horizontal swipe on `widget`, by a drag or by a two-finger touchpad scroll: `moved`
 /// with the distance so far as it goes (0 again when it stops short), and `swiped` once
-/// it passes `SWIPE`. `follows`: `moved` moves `widget` itself.
+/// it passes `distance`. `follows`: `moved` moves `widget` itself.
 pub fn swipe(
     widget: &impl IsA<gtk::Widget>,
+    distance: f64,
     follows: bool,
     moved: impl Fn(f64) + Clone + 'static,
     swiped: impl Fn() + Clone + 'static,
@@ -338,7 +347,7 @@ pub fn swipe(
     });
     let (end, at, done) = (moved.clone(), shown.clone(), swiped.clone());
     drag.connect_drag_end(move |_, _, _| {
-        if at.replace(0.0).abs() > SWIPE {
+        if at.replace(0.0).abs() > distance {
             done();
         } else {
             end(0.0);
@@ -354,7 +363,7 @@ pub fn swipe(
             1.0
         };
         at.set(at.get() - dx * step);
-        if at.get().abs() > SWIPE {
+        if at.get().abs() > distance {
             at.set(0.0);
             swiped();
         } else {

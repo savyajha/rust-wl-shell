@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::{self as gtk, prelude::*};
+use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -23,12 +24,15 @@ pub struct ClockItem {
     empty: gtk::Label,
     shown: Option<Notifications>,
     requests: UnboundedSender<Request>,
+    /// A swipe's distance to dismiss a notification.
+    swipe: f64,
 }
 
 impl ClockItem {
     /// The clock; its popover only with `notifications` (the history's sender), the
     /// `banners` hidden while it is open.
     pub fn new(
+        config: &Config,
         notifications: Option<UnboundedSender<Request>>,
         banners: Rc<RefCell<Banners>>,
         blur: &Option<Rc<Blur>>,
@@ -44,7 +48,7 @@ impl ClockItem {
         let dnd = Switch::new("Do Not Disturb", move |on| {
             let _ = sent.send(Request::Dnd(on));
         });
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         header.add_css_class("switch-row");
         let title = gtk::Label::builder()
             .label("Notifications")
@@ -62,11 +66,12 @@ impl ClockItem {
         });
         header.append(&title);
         header.append(&clear);
-        let groups = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let groups = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        groups.add_css_class("groups");
         let scrolled = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
-            .max_content_height(480)
+            .max_content_height(config.history_height as i32)
             .child(&groups)
             .build();
         let empty = gtk::Label::builder()
@@ -106,6 +111,7 @@ impl ClockItem {
             empty,
             shown: None,
             requests,
+            swipe: f64::from(config.swipe_distance),
         }
     }
 
@@ -125,7 +131,8 @@ impl ClockItem {
             self.groups.remove(&child);
         }
         for (app, notifications) in groups(&state.history) {
-            let group = gtk::Box::new(gtk::Orientation::Vertical, 4);
+            let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            group.add_css_class("group");
             let title = gtk::Label::builder().label(app).xalign(0.0).build();
             title.add_css_class("title");
             group.append(&title);
@@ -141,9 +148,9 @@ impl ClockItem {
     fn row(&self, n: &Notification) -> gtk::Box {
         let card = content(n, self.requests.clone());
         card.add_css_class("row");
-        let moved = follow_swipe(&card);
+        let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);
-        swipe(&card, true, moved, move || {
+        swipe(&card, self.swipe, true, moved, move || {
             let _ = requests.send(Request::Dismiss(id));
         });
         if n.actions.iter().any(|(key, _)| key == "default") {
@@ -162,13 +169,13 @@ impl ClockItem {
 }
 
 /// A row following a swipe: shifted by its margins, and fading.
-fn follow_swipe(card: &gtk::Box) -> impl Fn(f64) + Clone + 'static {
+fn follow_swipe(card: &gtk::Box, distance: f64) -> impl Fn(f64) + Clone + 'static {
     let card = card.downgrade();
     move |dx: f64| {
         if let Some(card) = card.upgrade() {
             card.set_margin_start(dx.max(0.0) as i32);
             card.set_margin_end((-dx).max(0.0) as i32);
-            card.set_opacity(1.0 - (dx.abs() / 200.0).min(0.8));
+            card.set_opacity(1.0 - (dx.abs() / (2.0 * distance)).min(0.8));
         }
     }
 }

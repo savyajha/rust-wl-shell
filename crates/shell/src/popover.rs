@@ -9,7 +9,7 @@ use std::rc::Rc;
 use gtk4::{self as gtk, glib, prelude::*};
 use gtk4_layer_shell::{KeyboardMode, LayerShell};
 
-use crate::blur::Blur;
+use crate::blur::{Blur, Corners};
 
 pub struct Item {
     pub button: gtk::MenuButton,
@@ -39,7 +39,7 @@ impl Item {
         popover.connect_show(|popover| keyboard(popover, KeyboardMode::OnDemand));
         popover.connect_closed(|popover| keyboard(popover, KeyboardMode::None));
         // The radius of style.css.
-        Blur::attach(blur, &popover, 10);
+        Blur::attach(blur, &popover, Corners::Popover);
         Self {
             button,
             popover,
@@ -73,7 +73,8 @@ impl Item {
             if entry.chosen {
                 circle.add_css_class("chosen");
             }
-            let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            content.add_css_class("row-content");
             content.append(&circle);
             let label = gtk::Label::builder()
                 .label(&entry.label)
@@ -156,7 +157,7 @@ pub struct Slider {
 
 impl Slider {
     pub fn new(icon: &impl IsA<gtk::Widget>, name: &str, moved: impl Fn(u32) + 'static) -> Self {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         row.add_css_class("slider-row");
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
         scale.set_hexpand(true);
@@ -194,7 +195,7 @@ pub struct Switch {
 
 impl Switch {
     pub fn new(title: &str, flipped: impl Fn(bool) + 'static) -> Self {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         row.add_css_class("switch-row");
         let label = gtk::Label::builder()
             .label(title)

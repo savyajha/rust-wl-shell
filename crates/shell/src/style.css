@@ -1,14 +1,71 @@
-/* Defaults for the accent colours GTK's own theme lacks; a user's gtk.css (matugen's, for
-   one) defines them at a higher priority, and wins. */
+/* The shell's look. Every value is a variable, defined once here; a user's stylesheet,
+   $XDG_CONFIG_HOME/rust-wl-shell/style.css, overrides them in its own `window { }` rule
+   (README). The config's sizes come before this file as variables too: --height,
+   --font-size, --icon-size, --spacing, --popover-radius and --panel-radius. */
+
+/* The accent: GTK's, unless a user's gtk.css (matugen's, for one) defines these at a
+   higher priority, and wins. */
 @define-color accent_bg_color @accent_color;
 @define-color accent_fg_color white;
 
+window {
+  /* Colours. */
+  --accent: @accent_bg_color;
+  --accent-fg: @accent_fg_color;
+  --fg: white;
+  --tint: rgba(0, 0, 0, 0.35);
+  --dialog-tint: rgba(0, 0, 0, 0.5);
+  --outline: rgba(255, 255, 255, 0.2);
+  --hover: rgba(255, 255, 255, 0.2);
+  --row-hover: rgba(255, 255, 255, 0.12);
+  --field: rgba(255, 255, 255, 0.12);
+  --button: rgba(255, 255, 255, 0.15);
+  --circle: rgba(255, 255, 255, 0.15);
+  --card: rgba(255, 255, 255, 0.08);
+  --track: rgba(255, 255, 255, 0.3);
+  --level: white;
+  --pill: rgba(255, 255, 255, 0.3);
+  --pill-hover: rgba(255, 255, 255, 0.45);
+  --error: #ff938a;
+  --dim: 0.7;
+  --off: 0.5;
+
+  /* Spacing. */
+  --space-xxs: 2px;
+  --space-xs: 4px;
+  --space-s: 6px;
+  --space-m: 8px;
+  --space-l: 10px;
+  --space-xl: 12px;
+  --space-xxl: 16px;
+  --space-xxxl: 24px;
+
+  /* Radii, beside the config's two. */
+  --radius-s: 6px;
+  --radius-m: 8px;
+  --radius-pill: 9999px;
+
+  /* Widths and heights. */
+  --popover-width: 220px;
+  --history-width: 320px;
+  --slider-width: 200px;
+  --osd-level-width: 200px;
+  --dialog-width: 300px;
+  --field-height: 32px;
+  --circle-size: 26px;
+  --circle-icon-size: 14px;
+  --track-height: 6px;
+  --picture-size: 40px;
+  --outline-width: 1px;
+  --transition: 200ms;
+}
+
 /* The bar: macOS's dark menu bar, a translucent tint over the compositor's blur, with white
-   text. The sizes are variables, set on window.bar from the config (main.rs). */
+   text. */
 
 window.bar {
-  background-color: rgba(0, 0, 0, 0.35);
-  color: white;
+  background-color: var(--tint);
+  color: var(--fg);
   font-size: var(--font-size);
   min-height: var(--height);
   padding: 0 var(--spacing);
@@ -23,28 +80,29 @@ window.bar image {
 }
 
 /* A workspace: a pill (vibepanel's), faint white, or filled with the accent when it is
-   shown on its output; tinted while hovered. Its sizes are set as it animates
-   (workspaces.rs); the button is as tall as the bar and the gap wider than its pill. */
+   shown on its output; tinted while hovered. Its sizes are the config's, set as it
+   animates (workspaces.rs); the button is as tall as the bar and the gap wider than its
+   pill. */
 window.bar button.workspace {
   all: unset;
 }
 
 window.bar button.workspace > .pill {
-  border-radius: 9999px;
-  background-color: rgba(255, 255, 255, 0.3);
-  transition: background-color 200ms;
+  border-radius: var(--radius-pill);
+  background-color: var(--pill);
+  transition: background-color var(--transition);
 }
 
 window.bar button.workspace:hover > .pill {
-  background-color: rgba(255, 255, 255, 0.45);
+  background-color: var(--pill-hover);
 }
 
 window.bar button.workspace.active > .pill {
-  background-color: @accent_bg_color;
+  background-color: var(--accent);
 }
 
 window.bar button.workspace.active:hover > .pill {
-  background-color: mix(@accent_bg_color, white, 0.2);
+  background-color: mix(var(--accent), white, 0.2);
 }
 
 window.bar .app {
@@ -61,26 +119,36 @@ window.bar menubutton.item > button,
 window.bar button.toggle {
   all: unset;
   padding: 0 calc(var(--spacing) * 3 / 4);
-  margin: 2px 0;
-  border-radius: 9999px;
+  margin: var(--space-xxs) 0;
+  border-radius: var(--radius-pill);
 }
 
 window.bar menubutton.item > button:hover,
 window.bar menubutton.item > button:checked,
 window.bar button.toggle:hover {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: var(--hover);
+}
+
+/* An item's icon and its text (the battery's percentage). */
+window.bar .face {
+  border-spacing: var(--space-xs);
+}
+
+/* VPN's icon while no connection is on. */
+window.bar image.off {
+  opacity: var(--off);
 }
 
 /* A toggle that is on (the night light, keep awake), filled with the accent. */
 window.bar button.toggle.on {
-  background-color: @accent_bg_color;
-  color: @accent_fg_color;
+  background-color: var(--accent);
+  color: var(--accent-fg);
 }
 
 /* A popover: frosted as the bar, rounded, with a thin outline; its arrow alike. */
 popover.item-popover > arrow {
-  background-color: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: var(--tint);
+  border: var(--outline-width) solid var(--outline);
 }
 
 /* GTK draws the arrow over the contents' border on its side, which an opaque fill would
@@ -95,50 +163,56 @@ window.bar.bottom popover.item-popover > contents {
 }
 
 popover.item-popover > contents {
-  background-color: rgba(0, 0, 0, 0.35);
-  color: white;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: var(--tint);
+  color: var(--fg);
+  border-radius: var(--popover-radius);
+  border: var(--outline-width) solid var(--outline);
   box-shadow: none;
-  padding: 8px 6px;
-  min-width: 220px;
+  padding: var(--space-m) var(--space-s);
+  min-width: var(--popover-width);
 }
 
 popover.item-popover .title {
   font-weight: 600;
-  margin: 0 6px 4px;
+  margin: 0 var(--space-s) var(--space-xs);
 }
 
 popover.item-popover .slider-row {
-  margin: 4px 6px 10px;
+  margin: var(--space-xs) var(--space-s) var(--space-l);
 }
 
 /* A row, as macOS's: a flat button with a plate while hovered; a round icon, filled with
    the accent when it is the one chosen, then its label. */
 popover.item-popover button.row {
   all: unset;
-  padding: 4px 6px;
-  border-radius: 6px;
+  padding: var(--space-xs) var(--space-s);
+  border-radius: var(--radius-s);
 }
 
 popover.item-popover button.row:hover {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: var(--row-hover);
+}
+
+popover.item-popover .row-content,
+popover.item-popover .slider-row,
+.switch-row {
+  border-spacing: var(--space-m);
 }
 
 popover.item-popover .circle {
-  min-width: 26px;
-  min-height: 26px;
-  border-radius: 9999px;
-  background-color: rgba(255, 255, 255, 0.15);
+  min-width: var(--circle-size);
+  min-height: var(--circle-size);
+  border-radius: var(--radius-pill);
+  background-color: var(--circle);
 }
 
 popover.item-popover .circle.chosen {
-  background-color: @accent_bg_color;
-  color: @accent_fg_color;
+  background-color: var(--accent);
+  color: var(--accent-fg);
 }
 
 popover.item-popover .circle > image {
-  -gtk-icon-size: 14px;
+  -gtk-icon-size: var(--circle-icon-size);
 }
 
 popover.item-popover .circle > label {
@@ -152,25 +226,25 @@ popover.item-popover button.mute {
 }
 
 popover.item-popover scale {
-  min-width: 200px;
+  min-width: var(--slider-width);
 }
 
 /* The sliders and the OSD's level: a white bar on a faint track, round at the ends. */
 popover.item-popover scale trough,
 window.osd levelbar trough {
-  background-color: rgba(255, 255, 255, 0.3);
+  background-color: var(--track);
   border: none;
-  border-radius: 9999px;
-  min-height: 6px;
+  border-radius: var(--radius-pill);
+  min-height: var(--track-height);
 }
 
 popover.item-popover scale highlight,
 window.osd levelbar block.filled {
-  background-color: white;
+  background-color: var(--level);
   border: none;
-  border-radius: 9999px;
-  min-width: 6px;
-  min-height: 6px;
+  border-radius: var(--radius-pill);
+  min-width: var(--track-height);
+  min-height: var(--track-height);
 }
 
 window.osd levelbar block.empty {
@@ -181,12 +255,16 @@ window.osd levelbar block.empty {
 /* The OSD: a frosted pill, as vibepanel's: an icon at 1.5 times the bar's, a 200 px level
    and its value. */
 window.osd {
-  background-color: rgba(0, 0, 0, 0.35);
-  color: white;
+  background-color: var(--tint);
+  color: var(--fg);
   font-size: var(--font-size);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 9999px;
-  padding: 10px 16px;
+  border: var(--outline-width) solid var(--outline);
+  border-radius: var(--radius-pill);
+  padding: var(--space-l) var(--space-xxl);
+}
+
+window.osd > box {
+  border-spacing: var(--space-xs);
 }
 
 window.osd image {
@@ -194,8 +272,8 @@ window.osd image {
 }
 
 window.osd levelbar {
-  min-width: 200px;
-  margin: 0 8px;
+  min-width: var(--osd-level-width);
+  margin: 0 var(--space-m);
 }
 
 window.osd label {
@@ -203,16 +281,16 @@ window.osd label {
 }
 
 popover.item-popover .line {
-  margin: 0 6px;
+  margin: 0 var(--space-s);
 }
 
 popover.item-popover .section {
-  margin-top: 8px;
+  margin-top: var(--space-m);
 }
 
 /* A popover's title with a switch, and what follows a row's label (a lock, a level). */
 popover.item-popover .switch-row {
-  margin: 0 6px 4px;
+  margin: 0 var(--space-s) var(--space-xs);
 }
 
 popover.item-popover .switch-row .title {
@@ -220,22 +298,31 @@ popover.item-popover .switch-row .title {
 }
 
 popover.item-popover .after {
-  opacity: 0.7;
+  opacity: var(--dim);
 }
 
 popover.item-popover expander {
-  margin: 0 6px;
+  margin: 0 var(--space-s);
 }
 
 /* The password dialog, as libadwaita's alert dialog: a frosted panel, a bold heading over
    the centred text, rounded fields, and equal pill buttons, Join filled with the accent. */
 window.dialog {
-  background-color: rgba(0, 0, 0, 0.5);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 14px;
-  padding: 24px;
-  min-width: 300px;
+  background-color: var(--dialog-tint);
+  color: var(--fg);
+  border: var(--outline-width) solid var(--outline);
+  border-radius: var(--panel-radius);
+  padding: var(--space-xxxl);
+  min-width: var(--dialog-width);
+}
+
+window.dialog .content,
+window.dialog .buttons {
+  border-spacing: var(--space-xl);
+}
+
+window.dialog .options {
+  border-spacing: var(--space-s);
 }
 
 window.dialog .heading {
@@ -244,41 +331,62 @@ window.dialog .heading {
 }
 
 window.dialog .error {
-  color: #ff938a;
+  color: var(--error);
 }
 
 window.dialog entry,
 window.dialog dropdown > button,
 window.dialog button.pill {
-  background: rgba(255, 255, 255, 0.12);
-  color: white;
+  background: var(--field);
+  color: var(--fg);
   border: none;
   box-shadow: none;
-  border-radius: 8px;
-  min-height: 32px;
+  border-radius: var(--radius-m);
+  min-height: var(--field-height);
 }
 
 window.dialog button.pill {
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 
 window.dialog button.suggested {
-  background: @accent_bg_color;
-  color: @accent_fg_color;
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 /* A notification's banner: frosted as a popover, a little larger; the app's name dim
    above the summary, in bold, and the body. In the clock's popover, its rows. */
 window.notification {
-  background-color: rgba(0, 0, 0, 0.35);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 14px;
-  padding: 10px 12px;
+  background-color: var(--tint);
+  color: var(--fg);
+  border: var(--outline-width) solid var(--outline);
+  border-radius: var(--panel-radius);
+  padding: var(--space-l) var(--space-xl);
+}
+
+.card {
+  border-spacing: var(--space-xs);
+}
+
+.card .header,
+.card .actions {
+  border-spacing: var(--space-s);
+}
+
+.card .main {
+  border-spacing: var(--space-m);
+}
+
+.card .text {
+  border-spacing: var(--space-xxs);
+}
+
+.card image.picture {
+  -gtk-icon-size: var(--picture-size);
 }
 
 .card .app {
-  opacity: 0.7;
+  opacity: var(--dim);
   font-size: 0.9em;
 }
 
@@ -289,24 +397,32 @@ window.notification {
 .card button.close,
 popover.item-popover button.clear {
   all: unset;
-  opacity: 0.7;
-  padding: 0 4px;
+  opacity: var(--dim);
+  padding: 0 var(--space-xs);
 }
 
 .card .actions button {
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
+  background: var(--button);
+  color: var(--fg);
   border: none;
   box-shadow: none;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 
 popover.item-popover .history .card.row {
-  padding: 6px;
-  border-radius: 8px;
-  background-color: rgba(255, 255, 255, 0.08);
+  padding: var(--space-s);
+  border-radius: var(--radius-m);
+  background-color: var(--card);
 }
 
 popover.item-popover .history {
-  min-width: 320px;
+  min-width: var(--history-width);
+}
+
+popover.item-popover .groups {
+  border-spacing: var(--space-m);
+}
+
+popover.item-popover .group {
+  border-spacing: var(--space-xs);
 }

@@ -279,8 +279,8 @@ and the UI's requests (`Expired`, `Dismiss`, `Action`, `ClearAll`, `Dnd`).
 In the UI (`notifications.rs`, `clock.rs`):
 
 - each banner is a window of its own on the overlay layer of the focused output (niri's),
-  anchored at the configured corner, 8 px from the edges (and below a bar, by its
-  exclusive zone), 360 px wide, frosted and rounded at 14 px as the dialog; they stack
+  anchored at the configured corner, `notification-gap` (8 px) from the edges (and below
+  a bar, by its exclusive zone), `notification-width` (360 px) wide, frosted and rounded at 14 px as the dialog; they stack
   from the corner, newest first. A banner shows the app's icon and name, ×, the image
   (`image-data`, as a texture), the summary, the body in Pango markup (as it is, if it
   does not parse) and up to three action buttons; an icon given as a `file://` URI or a
@@ -292,7 +292,7 @@ In the UI (`notifications.rs`, `clock.rs`):
   launch context (xdg-activation, niri's), so the app may raise its window.
 - a swipe (`notifications::swipe`): a horizontal `GtkGestureDrag`, or a two-finger
   horizontal scroll (`GtkEventControllerScroll`; a wheel's steps count 40 px). The
-  banner follows it by its margin on its anchored side and fades; past 100 px it is
+  banner follows it by its margin on its anchored side and fades; past `swipe-distance` (100 px) it is
   dismissed, short of it it goes back. The drag's offsets are in the banner's own
   coordinates, which move with it, so each is added to where it was. History rows
   swipe the same way, shifted by their margins.
@@ -374,10 +374,11 @@ output's workspaces and filters them again when the connector changes. `workspac
 output's workspaces that have windows (a window with that `workspace_id`, the core's
 `occupied`) and the one shown, as vibepanel does: one `button.workspace` each, holding a
 `.pill`, `.active` when shown, labelled "Workspace N" (or its name) for AT-SPI, sending
-`FocusWorkspace` when clicked. A pill is the icon size; the shown one is 11/8 as wide
-(vibepanel's 22 px on 16 on the owner's 30 px bar); a gap of 3/4 of the spacing is split
-either side of it, inside its button. When the workspaces change, every button's width
-(pill and gap) moves linearly, over 200 ms, from where it is to its new one, on one
+`FocusWorkspace` when clicked. A pill is `pill-size` (the icon size); the shown one is
+`active-pill-width` (11/8 as wide: vibepanel's 22 px on 16 on the owner's 30 px bar); a
+gap of `pill-gap` (3/4 of the spacing) is split either side of it, inside its button.
+These are config keys, not CSS, because the shell animates them. When the workspaces change, every button's width
+(pill and gap) moves linearly, over `workspace-animation` (200 ms), from where it is to its new one, on one
 clock that a further change starts again (a tick callback on the row): a switch's two
 widths change by opposite amounts, and the widths are rounded where each ends
 (`whole_pixels`), so the row's width, and what comes after it, stay put. A workspace
@@ -490,10 +491,10 @@ emptied on closing.
 ### The OSD
 
 `osd.rs` is vibepanel's look and numbers, not its code: one window on the overlay layer
-(namespace `rust-wl-shell-osd`), anchored to the bottom 48 px above the edge, with no
+(namespace `rust-wl-shell-osd`), anchored to the bottom `osd-margin` (48 px) above the edge, with no
 exclusive zone, no keyboard and an empty input region, on the focused output (niri's
 focused workspace's output). It is a frosted pill (padding 10 by 16 px) holding the icon
-at 1.5 times `icon-size`, a 200 px level with no knob, and the value, and it hides 1.5 s
+at 1.5 times `icon-size`, a 200 px level with no knob, and the value, and it hides `osd-timeout` (1.5 s)
 after the last showing. `shell.rs` shows it for a change of volume, mute or brightness
 between two updates of the same service: not for the first (at start-up, or when the
 service comes back), not for a switch of the default output (here or elsewhere, as on
@@ -502,13 +503,31 @@ user moves the slider. With its output switched off, it shows on the focused one
 
 ### Look
 
-`style.css` is fixed: a 0.35 black tint, white text, faint white workspace pills and the
-shown one in the accent, the app name at weight 600; popovers have the same tint, a 10 px radius and a thin
-white outline, with no shadow, so that the surface is the popover's own rectangle;
-sliders and the OSD's level are a white bar on a faint track. Its sizes are CSS
-variables (`--height`, `--font-size`, `--icon-size`, `--spacing`), set by
-one generated rule on `window.bar` and `window.osd` from the config (`main.rs`, `stylesheet`). The font family is the system's
-(`gtk-font-name`).
+`style.css` defines every value once, as a variable in its `window { }` rule (colours,
+a spacing scale `--space-xxs` to `--space-xxxl`, radii `--radius-s`, `--radius-m` and
+`--radius-pill`, and widths), and its rules use only them: a 0.35 black tint, white
+text, faint white workspace pills and the shown one in the accent (`--accent`, GTK's
+`@accent_bg_color`), the app name at weight 600; popovers have the same tint, a 10 px
+radius and a thin white outline, with no shadow, so that the surface is the popover's
+own rectangle; sliders and the OSD's level are a white bar on a faint track. A box's
+spacing is CSS too: its `border-spacing`, which GTK's box layout adds to its (zero)
+`spacing`. Before it, `style.rs` puts one generated `window { }` rule with what the
+config sets: `--height`, `--font-size`, `--icon-size`, `--spacing`, `--popover-radius`
+and `--panel-radius`. The radii are config keys because the blur's region follows them
+(`Corners` in `blur.rs`); the bar's height feeds its exclusive zone; layer-shell margins,
+the pills' animated sizes and the timings are the config's for the same reason, CSS not
+reaching them. The font family is the system's (`gtk-font-name`).
+
+Both go at GTK's application priority. The user's stylesheet,
+`$XDG_CONFIG_HOME/rust-wl-shell/style.css`, goes over them at user priority, in a
+provider of its own: read at start-up and again on each event of a `GFileMonitor` on it
+but `CHANGED` (a write's end comes as `CHANGES_DONE_HINT`; a rename over it, as
+home-manager replaces its symlink, as `RENAMED` with `WATCH_MOVES`; a monitor on a file
+watches its directory for its name, and polls for a directory that does not exist yet).
+A missing file is an empty one. A file with a `parsing-error` (each logged, by line) is
+replaced by nothing, so the built-in look stays, rather than the part GTK could parse;
+but a warning (`GtkCssParserWarning`: an empty declaration, an unknown media feature)
+is logged only.
 
 ### Blur
 
@@ -674,6 +693,11 @@ run on the system bus. The test checks:
 16. from a bottom bar (a second shell with `position "bottom"`), the popover opens upward
     and its arrow's middle column, from above its tip into the contents, is one tint:
     no line across its base
+17. a user stylesheet setting `--tint` makes the bar red, rewritten blue (each written
+    and renamed over the file); one that does not parse leaves the built-in tint, is
+    logged, and the shell has not restarted; one with an override and `;;` stays
+    applied, GTK's "Empty declaration" warning logged; a symlink renamed over it (as home-manager
+    does) is followed; removed, the built-in tint again
 
 The network's VM test (`tests/network.nix`, in the same session, `tests/session.nix`)
 has real Wi-Fi: four `mac80211_hwsim` radios, NetworkManager on its iwd backend for

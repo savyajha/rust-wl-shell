@@ -14,7 +14,7 @@ use tracing::info;
 
 use crate::Marks;
 use crate::bar::{self, Bar, Msg};
-use crate::blur::Blur;
+use crate::blur::{Blur, Corners};
 use crate::dialog::Dialog;
 use crate::notifications::Banners;
 use crate::osd::Osd;
@@ -66,7 +66,8 @@ pub fn start(
         notifications,
         power,
     } = core;
-    let blur = Blur::new(display).map(Rc::new);
+    let radii = (config.popover_radius as i32, config.panel_radius as i32);
+    let blur = Blur::new(display, radii).map(Rc::new);
     // The dialog, the banners and the OSD: blurred by the shell (its region's corners in
     // whole pixels), or by niri's layer rule, which rounds them smoothly (README).
     let layer_blur = blur.clone().filter(|_| !config.niri_blur_rule);
@@ -81,13 +82,13 @@ pub fn start(
         night_light,
         keep_awake,
         banners: Rc::new(RefCell::new(Banners::new(
-            config.notification_position,
+            &config,
             notifications.clone(),
             layer_blur.clone(),
         ))),
         notifications,
         power,
-        osd: config.osd.then(|| Osd::new(&layer_blur)),
+        osd: config.osd.then(|| Osd::new(&config, &layer_blur)),
         config: Rc::new(config),
         blur,
         bars: Vec::new(),
@@ -152,7 +153,7 @@ impl Shell {
                 blur: self.blur.clone(),
             })
             .detach();
-        Blur::attach(&self.blur, bar.widget(), 0);
+        Blur::attach(&self.blur, bar.widget(), Corners::Square);
         for update in &self.latest {
             bar.emit(Msg::Update(update.clone()));
         }
