@@ -7,7 +7,7 @@ use gtk4::{self as gtk, prelude::*};
 use shell_core::bluetooth::{Bluetooth, Device, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::popover::{Circle, Item, Row, Switch};
+use crate::popover::{Circle, Item, Row, Switch, section};
 
 pub struct BluetoothItem {
     pub item: Item,
@@ -27,23 +27,8 @@ impl BluetoothItem {
         let switch = Switch::new("Bluetooth", move |on| {
             let _ = sent.send(Request::Power(on));
         });
-        let section = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        section.add_css_class("section");
-        let title = gtk::Label::builder().label("Devices").xalign(0.0).build();
-        title.add_css_class("title");
-        let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let none = gtk::Label::builder()
-            .label("No devices")
-            .xalign(0.0)
-            .build();
-        none.add_css_class("line");
-        for widget in [
-            title.upcast_ref::<gtk::Widget>(),
-            rows.upcast_ref(),
-            none.upcast_ref(),
-        ] {
-            section.append(widget);
-        }
+        let (section, rows, none) = section("Devices");
+        none.set_label("No devices");
         item.content.append(&switch.row);
         item.content.append(&section);
         Self {
@@ -57,9 +42,7 @@ impl BluetoothItem {
     }
 
     pub fn show(&self, bluetooth: Option<&Bluetooth>) {
-        self.item.button.set_visible(bluetooth.is_some());
-        let Some(bluetooth) = bluetooth else {
-            self.item.popover.popdown();
+        let Some(bluetooth) = self.item.state(bluetooth) else {
             return;
         };
         if self.shown.borrow().as_ref() == Some(bluetooth) {
@@ -70,12 +53,10 @@ impl BluetoothItem {
         let (icon, label) = match (bluetooth.powered, connected) {
             (false, _) => ("bluetooth-disabled-symbolic", "Bluetooth: off"),
             (true, true) => ("bluetooth-active-symbolic", "Bluetooth: connected"),
-            (true, false) => ("bluetooth-disconnected-symbolic", "Bluetooth: on"),
+            (true, false) => ("bluetooth-symbolic", "Bluetooth: on"),
         };
         self.icon.set_icon_name(Some(icon));
-        self.item
-            .button
-            .update_property(&[gtk::accessible::Property::Label(label)]);
+        self.item.set_name(label);
         self.switch.show(bluetooth.powered);
         let (section, rows, none) = &self.devices;
         section.set_visible(bluetooth.powered);

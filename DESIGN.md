@@ -281,11 +281,22 @@ In the UI (`notifications.rs`, `clock.rs`):
 - each banner is a window of its own on the overlay layer of the focused output (niri's),
   anchored at the configured corner, `notification-gap` (8 px) from the edges (and below
   a bar, by its exclusive zone), `notification-width` (360 px) wide, frosted and rounded at `panel-radius` (14 px); they stack
-  from the corner, newest first. A banner shows the app's icon and name, ×, the image
-  (`image-data`, as a texture), the summary, the body in Pango markup (as it is, if it
-  does not parse) and up to three action buttons; an icon given as a `file://` URI or a
-  path is loaded from the file. Its countdown (`Countdown`) pauses while the pointer is
-  over it; destroyed with its window still pending (its output gone), the banner
+  from the corner, newest first. A banner (`notifications::content`) is macOS's: on the
+  left the app's icon, full colour, 40 px (its desktop file's, from the `desktop-entry`
+  hint through `DesktopAppInfo`, else the icon it sent, as a name, a path or a `file://`
+  URI, else `application-x-executable`), or its image (`image-data`, as a texture) with
+  the app's icon a 16 px badge on its corner; the summary in bold (two lines at most)
+  and the body in Pango markup (as
+  it is, if it does not parse), three lines at most; no app name. One action other than
+  `default` is a button on the right; more are "Options", a menu button whose popover
+  (the bar's popovers' look) lists them, below the banner at the button's right edge, taking the keyboard while open
+  (`OnDemand`, as the bar's popovers; Escape closes it). × is round, over the card's top-left corner,
+  shown while the pointer is over the card (CSS `:hover`; always in the tree, for
+  screen readers, named `Dismiss "summary"`); inside the banner's padding rather than past its edge, as a layer
+  surface has no room outside it that its blur would not cover. The history's rows use
+  the same card, without actions, with the time after the summary, muted ("now", "5m",
+  "2h"; refreshed each time the popover shows). Its countdown (`Countdown`) pauses while the pointer
+  is over it, or its menu is open (resumed when it closes only if the pointer has left); destroyed with its window still pending (its output gone), the banner
   expires: a replaced notification's banner is built again, with its whole time. While
   a clock's popover (the history) is open, the banners are hidden, their countdowns
   still running: their windows are destroyed (their countdowns taken out first) and
@@ -314,7 +325,9 @@ In the UI (`notifications.rs`, `clock.rs`):
   not noticed); the banners stack by their heights as measured on the focused output,
   so a banner shown on another output (the focus moved) can leave a gap; the `resident`
   hint is not honoured (acting on a notification always closes it).
-- the clock is an item now: its popover has "Do Not Disturb" (a switch), then
+- the clock is an item now (with `notifications-disabled-symbolic` before the time
+  while Do Not Disturb is on, as macOS's Focus moon, "Do Not Disturb" for screen
+  readers): its popover has "Do Not Disturb" (a switch), then
   "Notifications" with "Clear all", and the history grouped by app (the app with the
   newest first), each entry a card as a banner's, with ×, swiped away, a click its
   default action while it still has one; "No notifications" when empty. It scrolls
@@ -453,10 +466,12 @@ one:
   has a slider.
 - the clock (`clock.rs`): the time, and the notifications' history (below).
 - the night light and keep awake (`toggles.rs`): click toggles with no popover, flat
-  buttons as the items, filled with the accent while on (`night-light-symbolic`, the
-  theme's moon; keep awake's cup is the shell's own `rust-wl-shell-keep-awake-symbolic`,
-  installed with it and added to the icon theme's search path at start, as Adwaita has
-  no cup); "Night light: on", "Keep awake: off" for screen readers. A click asks for the
+  buttons as the items, their state told by their icon, never a fill (only these and
+  VPN have an on/off look): `night-light-symbolic`, the theme's moon, or
+  `night-light-disabled-symbolic`; keep awake's cups are the shell's own,
+  `rust-wl-shell-keep-awake-symbolic` steaming and `rust-wl-shell-keep-awake-off-symbolic`
+  empty, installed with it and added to the icon theme's search path at start, as
+  Adwaita has no cup; "Night light: on", "Keep awake: off" for screen readers. A click asks for the
   other state, shown once the core says so; hidden until it does.
 - the network: the primary connection's icon (`network-wireless-signal-*-symbolic`
   in four levels, `network-wired-symbolic`, `network-wireless-acquiring-symbolic`, or
@@ -468,10 +483,11 @@ one:
   signal and, after the name, a lock for a secured network. A click on a known network
   activates it (on the current one, nothing); on another, an open one joins and a
   secured one opens the dialog.
-- VPN: `network-vpn-symbolic`, dimmed while none is on, hidden with no VPN connection;
+- VPN: `network-vpn-symbolic`, or `network-vpn-disabled-symbolic` while none is on, hidden with no VPN connection;
   a row per connection, a click switching it on or off ("Connecting…" after it while
   it connects).
-- Bluetooth: `bluetooth-{active,disconnected,disabled}-symbolic`; a "Bluetooth" title
+- Bluetooth: `bluetooth-active-symbolic` connected, `bluetooth-symbolic` on with nothing
+  connected, `bluetooth-disabled-symbolic` off; a "Bluetooth" title
   with a switch, then "Devices": the paired ones with their kind's icon (BlueZ's icon
   names mapped to the theme's symbolic ones), chosen when connected, their battery after
   the name; "No devices" when there are none. A click connects or disconnects.
@@ -522,7 +538,7 @@ user moves the slider. With its output switched off, it shows on the focused one
 ### Look
 
 `style.css` defines every value once, as a variable in its `window { }` rule (colours,
-a spacing scale `--space-xxs` to `--space-xxxl`, radii `--radius-s`, `--radius-m` and
+a spacing scale `--space-xxs` to `--space-xxl`, radii `--radius-m` and
 `--radius-pill`, and widths), and its rules use only them: a 0.35 black tint, white
 text, faint white workspace pills and the shown one in the accent (`--accent`, GTK's
 `@accent_bg_color`), the app name at weight 600; the OSD's level a white bar on a faint

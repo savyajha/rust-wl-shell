@@ -10,7 +10,7 @@ use shell_core::network::{
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::dialog::Dialog;
-use crate::popover::{Circle, Item, Row, Switch};
+use crate::popover::{Circle, Item, Row, Switch, title};
 
 /// The primary connection's icon; its popover has the Wi-Fi switch, a wired connection
 /// when there is one, the known networks in range, and the others under "Other Networks".
@@ -81,9 +81,7 @@ impl NetworkItem {
     }
 
     pub fn show(&self, network: Option<&Network>) {
-        self.item.button.set_visible(network.is_some());
-        let Some(network) = network else {
-            self.item.popover.popdown();
+        let Some(network) = self.item.state(network) else {
             return;
         };
         let before = self.shown.replace(Some(network.clone()));
@@ -108,9 +106,7 @@ impl NetworkItem {
             Primary::Offline => ("network-offline-symbolic", "Network: offline".into()),
         };
         self.icon.set_icon_name(Some(icon));
-        self.item
-            .button
-            .update_property(&[gtk::accessible::Property::Label(&label)]);
+        self.item.set_name(&label);
 
         self.wifi.row.set_visible(network.wifi_present);
         self.wifi.show(network.wifi_enabled);
@@ -208,8 +204,8 @@ fn signal_icon(strength: u8) -> &'static str {
     }
 }
 
-/// The VPN connections: hidden when there are none; the icon dimmed while none is on. A
-/// click on one switches it on or off.
+/// The VPN connections: hidden when there are none; the icon struck through while none is
+/// on. A click on one switches it on or off.
 pub struct VpnItem {
     pub item: Item,
     icon: gtk::Image,
@@ -222,8 +218,7 @@ impl VpnItem {
     pub fn new(requests: UnboundedSender<Request>) -> Self {
         let icon = gtk::Image::from_icon_name("network-vpn-symbolic");
         let item = Item::new(&icon, "VPN");
-        let title = gtk::Label::builder().label("VPN").xalign(0.0).build();
-        title.add_css_class("title");
+        let title = title("VPN");
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
         item.content.append(&title);
         item.content.append(&rows);
@@ -238,25 +233,18 @@ impl VpnItem {
 
     pub fn show(&self, network: Option<&Network>) {
         let vpns = network.map(|n| n.vpns.clone()).unwrap_or_default();
-        self.item.button.set_visible(!vpns.is_empty());
-        if vpns.is_empty() {
-            self.item.popover.popdown();
-        }
+        self.item.state((!vpns.is_empty()).then_some(()));
         if *self.shown.borrow() == vpns {
             return;
         }
         self.shown.replace(vpns.clone());
         let on = vpns.iter().filter(|v| v.state != VpnState::Off).count();
-        // Dimmed while off (style.css).
-        if on > 0 {
-            self.icon.remove_css_class("off");
-        } else {
-            self.icon.add_css_class("off");
-        }
+        self.icon.set_icon_name(Some(match on {
+            0 => "network-vpn-disabled-symbolic",
+            _ => "network-vpn-symbolic",
+        }));
         let label = if on > 0 { "VPN: on" } else { "VPN: off" };
-        self.item
-            .button
-            .update_property(&[gtk::accessible::Property::Label(label)]);
+        self.item.set_name(label);
         let rows: Vec<Row> = vpns
             .iter()
             .map(|v| Row {

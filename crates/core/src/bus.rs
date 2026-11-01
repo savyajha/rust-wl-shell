@@ -14,6 +14,8 @@ use zbus::zvariant::OwnedValue;
 
 /// How long the system bus gets to answer before the services go without it.
 const TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a service's burst of changes (a scan, a device connecting) gets to settle.
+const SETTLE: Duration = Duration::from_millis(100);
 
 pub type Properties = HashMap<String, OwnedValue>;
 
@@ -91,4 +93,17 @@ pub fn get<T: TryFrom<OwnedValue>>(all: &Properties, name: &str) -> Option<T> {
 
 fn interface(object: Object) -> InterfaceName<'static> {
     InterfaceName::from_static_str_unchecked(object.interface)
+}
+
+/// Let a burst of changes settle: `SETTLE`, what `stream` sends meanwhile swallowed (the
+/// state is read again after). `false` if it ended.
+pub async fn settle<S: futures_lite::Stream + Unpin>(stream: &mut S) -> bool {
+    let wait = time::sleep(SETTLE);
+    tokio::pin!(wait);
+    loop {
+        tokio::select! {
+            () = &mut wait => return true,
+            item = stream.next() => if item.is_none() { return false },
+        }
+    }
 }

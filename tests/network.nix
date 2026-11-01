@@ -29,10 +29,10 @@
 #  10. Bluetooth: the paired devices (the battery's level after one), connect and
 #      disconnect, and the adapter's switch
 #  11. none of the passwords typed is in the system's or alice's journal
-#  12. the night light (a stand-in wlsunset unit): on with its unit, the item filled
-#      with the accent; a click stops the unit and another starts it; stopped with
-#      systemctl, the item follows
-#  13. keep awake: off at start; on, logind lists its idle inhibitor (block) and its
+#  12. the night light (a stand-in wlsunset unit): on with its unit, its icon the moon
+#      (no fill), struck through when off; a click stops the unit and another starts it;
+#      stopped with systemctl, the item follows
+#  13. keep awake: off at start, an empty cup; on, a steaming one (no fill), logind lists its idle inhibitor (block) and its
 #      idle action (lock, 5 s) waits; off, the action comes
 #  14. no GTK warning of widgets moved between windows (the dialog builds its widgets
 #      for each window) in the shell's journal
@@ -417,6 +417,8 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(lambda t: not dialog_open(t), "the dialog closed by NM")
         typing_reaches_the_window("after-nm-cancel")
         # Asked again, then its output goes: NM answered at once (not left to its 2 min).
+        # Cafe not joined on its own meanwhile (iwd would, racing NM's join of Home).
+        machine.succeed("nmcli connection modify Cafe connection.autoconnect no")
         agent_asks()
         machine.wait_until_succeeds("nmcli -t -f STATE device | grep -q 'need auth'", timeout=10)
         niri("output Virtual-1 off")
@@ -485,8 +487,8 @@ pkgs.testers.runNixOSTest {
         typing_reaches_the_window("after-bluetooth")
 
     def accent_pixels():
-        """The bar's right half's pixels in GTK's default accent (#3584e4): a toggle that is
-        on (the shown workspace's pill, on the left, is in it too)."""
+        """The bar's right half's pixels in GTK's default accent (#3584e4): a fill, which no
+        toggle has (the shown workspace's pill, on the left, is out of it)."""
         move(512, 400)
         time.sleep(0.5)
         shot = screen()
@@ -495,13 +497,22 @@ pkgs.testers.runNixOSTest {
             if (lambda p: p[2] > 180 and p[0] < 100)(pixel(shot, x, y))
         )
 
+    def items_look():
+        """The bar's items left of the clock (whose time may change), as pixels: a toggle
+        tells its state by its icon, so they change with it."""
+        clock = right_items()[0][0]
+        shot = screen()
+        return [pixel(shot, x, y) for x in range(512, clock - 6) for y in range(2, HEIGHT - 2)]
+
     with subtest("the night light starts and stops its unit, and follows it"):
         wait_for_tree(has("button", "Night light: on"), "the night light, on with its unit")
-        assert accent_pixels() > 50
+        # On: no accent fill, its icon (the moon) instead; off, the moon struck through.
+        assert accent_pixels() < 5
+        on = items_look()
         act("Night light: on")
         machine.wait_until_fails(f"{PREFIX} systemctl --user is-active wlsunset", timeout=10)
         wait_for_tree(has("button", "Night light: off"), "the night light off")
-        assert accent_pixels() < 5
+        assert accent_pixels() < 5 and items_look() != on, "the same icon off"
         act("Night light: off")
         machine.wait_until_succeeds(f"{PREFIX} systemctl --user is-active wlsunset", timeout=10)
         wait_for_tree(has("button", "Night light: on"), "the night light on again")
@@ -513,9 +524,11 @@ pkgs.testers.runNixOSTest {
 
     with subtest("keep awake holds an idle inhibitor, which logind's idle action waits for"):
         wait_for_tree(has("button", "Keep awake: off"), "keep awake, off at start")
+        off = items_look()
         act("Keep awake: off")
         wait_for_tree(has("button", "Keep awake: on"), "keep awake on")
-        assert accent_pixels() > 50
+        # A steaming cup now, not a fill.
+        assert accent_pixels() < 5 and items_look() != off, "the same icon on"
         inhibitors = machine.succeed("systemd-inhibit --list --no-pager")
         print(inhibitors)
         line = next(line for line in inhibitors.splitlines() if "rust-wl-shell" in line)

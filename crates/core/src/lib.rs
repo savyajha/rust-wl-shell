@@ -68,6 +68,12 @@ pub enum Update {
 pub struct Core {
     /// Closes when the core stops, which it does only when niri's IPC fails.
     pub updates: UnboundedReceiver<Update>,
+    pub senders: Senders,
+}
+
+/// Where the shell sends the core its requests: one for each service, cloned to each bar.
+#[derive(Clone)]
+pub struct Senders {
     pub niri: UnboundedSender<niri::Command>,
     /// The power profile to set: one of `power_profiles::PROFILES`.
     pub profiles: UnboundedSender<String>,
@@ -170,16 +176,18 @@ pub fn start(config: &config::Config) -> Core {
         .expect("starting the core's thread");
     Core {
         updates,
-        niri,
-        profiles,
-        audio,
-        brightness,
-        network,
-        answers,
-        bluetooth,
-        night_light,
-        keep_awake,
-        notifications,
-        power,
+        senders: Senders {
+            niri,
+            profiles,
+            audio,
+            brightness,
+            network,
+            answers,
+            bluetooth,
+            night_light,
+            keep_awake,
+            notifications,
+            power,
+        },
     }
 }

@@ -9,9 +9,8 @@ use gtk4::{self as gtk, gdk, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use relm4::{Component, ComponentParts, ComponentSender};
 use shell_core::config::{Config, Position};
-use shell_core::niri::{self, Workspace};
-use shell_core::{Update, audio, bluetooth, network, notifications, power};
-use tokio::sync::mpsc::UnboundedSender;
+use shell_core::niri::Workspace;
+use shell_core::{Senders, Update};
 
 use crate::bluetooth::BluetoothItem;
 use crate::clock::ClockItem;
@@ -52,18 +51,7 @@ pub struct Bar {
 pub struct Init {
     pub monitor: gdk::Monitor,
     pub config: Rc<Config>,
-    pub niri: UnboundedSender<niri::Command>,
-    /// The power profile to set.
-    pub profiles: UnboundedSender<String>,
-    pub audio: audio::Requests,
-    /// The backlight's level to set.
-    pub brightness: UnboundedSender<u8>,
-    pub network: UnboundedSender<network::Request>,
-    pub bluetooth: UnboundedSender<bluetooth::Request>,
-    pub night_light: UnboundedSender<bool>,
-    pub keep_awake: UnboundedSender<bool>,
-    pub notifications: UnboundedSender<notifications::Request>,
-    pub power: UnboundedSender<power::Request>,
+    pub senders: Senders,
     /// The shell's banners, hidden while the clock's popover is open.
     pub banners: Rc<RefCell<Banners>>,
     /// The shell's one password dialog.
@@ -135,35 +123,39 @@ impl Component for Bar {
             monitor: init.monitor.clone(),
             all: Vec::new(),
             workspaces: Vec::new(),
-            switcher: Workspaces::new(init.niri.clone(), config),
+            switcher: Workspaces::new(init.senders.niri.clone(), config),
             app: String::new(),
-            power: (config.power).then(|| PowerItem::new(init.power.clone())),
+            power: (config.power).then(|| PowerItem::new(init.senders.power.clone())),
             clock: ClockItem::new(
                 config,
-                config.notifications.then(|| init.notifications.clone()),
+                config
+                    .notifications
+                    .then(|| init.senders.notifications.clone()),
                 init.banners.clone(),
             ),
-            layout: (config.keyboard_layout).then(|| LayoutItem::new(init.niri.clone())),
-            brightness: (config.brightness).then(|| BrightnessItem::new(init.brightness.clone())),
+            layout: (config.keyboard_layout).then(|| LayoutItem::new(init.senders.niri.clone())),
+            brightness: (config.brightness)
+                .then(|| BrightnessItem::new(init.senders.brightness.clone())),
             night_light: (config.night_light).then(|| {
-                let sent = init.night_light.clone();
+                let sent = init.senders.night_light.clone();
                 Toggle::new(toggles::NIGHT_LIGHT, "Night light", move |on| {
                     let _ = sent.send(on);
                 })
             }),
             keep_awake: (config.keep_awake).then(|| {
-                let sent = init.keep_awake.clone();
+                let sent = init.senders.keep_awake.clone();
                 Toggle::new(toggles::KEEP_AWAKE, "Keep awake", move |on| {
                     let _ = sent.send(on);
                 })
             }),
-            volume: (config.volume).then(|| VolumeItem::new(init.audio.clone())),
-            vpn: (config.vpn).then(|| VpnItem::new(init.network.clone())),
-            bluetooth: (config.bluetooth).then(|| BluetoothItem::new(init.bluetooth.clone())),
+            volume: (config.volume).then(|| VolumeItem::new(init.senders.audio.clone())),
+            vpn: (config.vpn).then(|| VpnItem::new(init.senders.network.clone())),
+            bluetooth: (config.bluetooth)
+                .then(|| BluetoothItem::new(init.senders.bluetooth.clone())),
             network: (config.network)
-                .then(|| NetworkItem::new(init.network.clone(), init.dialog.clone())),
+                .then(|| NetworkItem::new(init.senders.network.clone(), init.dialog.clone())),
             battery: (config.battery).then(|| {
-                let profiles = config.power_profile.then(|| init.profiles.clone());
+                let profiles = config.power_profile.then(|| init.senders.profiles.clone());
                 BatteryItem::new(config.battery_percentage, profiles)
             }),
         };

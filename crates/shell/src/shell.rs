@@ -8,8 +8,7 @@ use gio_unix::DesktopAppInfo;
 use gtk4::{gdk, gio, glib, prelude::*};
 use relm4::{Component, ComponentController, Controller};
 use shell_core::config::Config;
-use shell_core::{Core, Update, audio, bluetooth, network, niri, notifications, power};
-use tokio::sync::mpsc::UnboundedSender;
+use shell_core::{Core, Senders, Update};
 use tracing::info;
 
 use crate::Marks;
@@ -22,16 +21,7 @@ use crate::sliders::{self, BRIGHTNESS};
 
 struct Shell {
     config: Rc<Config>,
-    niri: UnboundedSender<niri::Command>,
-    profiles: UnboundedSender<String>,
-    audio: audio::Requests,
-    brightness: UnboundedSender<u8>,
-    network: UnboundedSender<network::Request>,
-    bluetooth: UnboundedSender<bluetooth::Request>,
-    night_light: UnboundedSender<bool>,
-    keep_awake: UnboundedSender<bool>,
-    notifications: UnboundedSender<notifications::Request>,
-    power: UnboundedSender<power::Request>,
+    senders: Senders,
     banners: Rc<RefCell<Banners>>,
     dialog: Rc<Dialog>,
     osd: Option<Osd>,
@@ -55,39 +45,19 @@ pub fn start(
 ) {
     let Core {
         mut updates,
-        niri,
-        profiles,
-        audio,
-        brightness,
-        network,
-        answers,
-        bluetooth,
-        night_light,
-        keep_awake,
-        notifications,
-        power,
+        senders,
     } = core;
     let blur = Blur::new(display, config.panel_radius as i32).map(Rc::new);
     // The banners and the OSD: blurred by the shell (its region's corners in
     // whole pixels), or by niri's layer rule, which rounds them smoothly (README).
     let layer_blur = blur.clone().filter(|_| !config.niri_blur_rule);
+    let s = &senders;
+    let dialog = Dialog::new(s.network.clone(), s.answers.clone(), s.power.clone());
+    let banners = Banners::new(&config, s.notifications.clone(), layer_blur.clone());
     let shell = Rc::new(RefCell::new(Shell {
-        niri,
-        profiles,
-        audio,
-        brightness,
-        dialog: Dialog::new(network.clone(), answers, power.clone()),
-        network,
-        bluetooth,
-        night_light,
-        keep_awake,
-        banners: Rc::new(RefCell::new(Banners::new(
-            &config,
-            notifications.clone(),
-            layer_blur.clone(),
-        ))),
-        notifications,
-        power,
+        dialog,
+        banners: Rc::new(RefCell::new(banners)),
+        senders,
         osd: config.osd.then(|| Osd::new(&config, &layer_blur)),
         config: Rc::new(config),
         blur,
@@ -138,16 +108,7 @@ impl Shell {
             .launch(bar::Init {
                 monitor: monitor.clone(),
                 config: self.config.clone(),
-                niri: self.niri.clone(),
-                profiles: self.profiles.clone(),
-                audio: self.audio.clone(),
-                brightness: self.brightness.clone(),
-                network: self.network.clone(),
-                bluetooth: self.bluetooth.clone(),
-                night_light: self.night_light.clone(),
-                keep_awake: self.keep_awake.clone(),
-                notifications: self.notifications.clone(),
-                power: self.power.clone(),
+                senders: self.senders.clone(),
                 banners: self.banners.clone(),
                 dialog: self.dialog.clone(),
             })

@@ -15,6 +15,9 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::blur::{Blur, Corners};
 
+/// Between a banner and its menu ("Options").
+const MENU_GAP: i32 = 6;
+
 /// A banner's pending timeout, if it has one.
 type Timer = Rc<RefCell<Option<glib::SourceId>>>;
 
@@ -171,20 +174,68 @@ impl Banners {
         }
         let requests = self.requests.clone();
         let id = n.id;
-        let card = content(n, requests.clone());
-        let buttons = n.actions.iter().filter(|(key, _)| key != "default").take(3);
-        let row = gtk::Box::builder()
-            .homogeneous(true)
-            .css_classes(["actions"])
-            .build();
-        for (key, label) in buttons {
-            let button = gtk::Button::with_label(label);
-            let (requests, key) = (requests.clone(), key.clone());
-            button.connect_clicked(move |button| act(&requests, id, &key, button));
-            row.append(&button);
+        // One action a button on the right; more, a menu ("Options"), as macOS's.
+        let actions: Vec<_> = n
+            .actions
+            .iter()
+            .filter(|(key, _)| key != "default")
+            .collect();
+        let (side, menu) = match actions[..] {
+            [] => (None, None),
+            [(key, label)] => {
+                let button = gtk::Button::with_label(label);
+                let (requests, key) = (requests.clone(), key.clone());
+                button.connect_clicked(move |button| act(&requests, id, &key, button));
+                (Some(button.upcast::<gtk::Widget>()), None)
+            }
+            _ => {
+                let (rows, menu) = (
+                    gtk::Box::new(gtk::Orientation::Vertical, 0),
+                    gtk::Popover::new(),
+                );
+                for (key, label) in actions {
+                    let text = gtk::Label::builder().label(label).xalign(0.0).build();
+                    let row = gtk::Button::builder()
+                        .child(&text)
+                        .css_classes(["row"])
+                        .build();
+                    row.update_property(&[gtk::accessible::Property::Label(label)]);
+                    let (requests, key, menu) = (requests.clone(), key.clone(), menu.clone());
+                    row.connect_clicked(move |row| {
+                        act(&requests, id, &key, row);
+                        menu.popdown();
+                    });
+                    rows.append(&row);
+                }
+                menu.set_child(Some(&rows));
+                menu.add_css_class("item-popover");
+                menu.set_has_arrow(false);
+                let button = gtk::MenuButton::builder()
+                    .label("Options")
+                    .popover(&menu)
+                    .build();
+                button.set_always_show_arrow(true);
+                (Some(button.upcast()), Some(menu))
+            }
+        };
+        if let Some(side) = &side {
+            side.add_css_class("action");
         }
-        if row.first_child().is_some() {
-            card.append(&row);
+        let card = content(n, requests.clone(), side.as_ref(), None);
+        if let (Some(menu), Some(button)) = (&menu, &side) {
+            // The menu takes the keyboard while open (Escape), as the bar's popovers; below
+            // the banner, at the button's right edge, as macOS's.
+            menu.set_halign(gtk::Align::End);
+            let (shown, button) = (window.clone(), button.clone());
+            menu.connect_show(move |menu| {
+                if let Some(b) = button.compute_bounds(&shown) {
+                    let below = shown.height() as f32 - b.y() - b.height();
+                    menu.set_offset(0, below as i32 + MENU_GAP);
+                }
+                shown.set_keyboard_mode(KeyboardMode::OnDemand);
+            });
+            let closed = window.clone();
+            menu.connect_closed(move |_| closed.set_keyboard_mode(KeyboardMode::None));
         }
         window.set_child(Some(&card));
         // The banner follows a swipe sideways, as far as its anchored edge lets it.
@@ -216,7 +267,7 @@ impl Banners {
             card.add_controller(click);
         }
         if let Some(countdown) = countdown {
-            countdown.follow(&card, &window);
+            countdown.follow(&card, &window, menu.as_ref());
         }
         Blur::attach(&self.blur, &window, Corners::Panel);
         window.set_visible(true);
@@ -248,13 +299,15 @@ impl Countdown {
         *self.timer.borrow_mut() = Some(source);
     }
 
-    /// The clock stopped while the pointer is over `card`. Destroyed with `window` still
-    /// pending (not by `Banners`, which takes it first: its output gone), the banner is
-    /// expired at once.
-    fn follow(&self, card: &gtk::Box, window: &gtk::Window) {
+    /// The clock stopped while the pointer is over `card`, or its `menu` is open. Destroyed
+    /// with `window` still pending (not by `Banners`, which takes it first: its output
+    /// gone), the banner is expired at once.
+    fn follow(&self, card: &gtk::Overlay, window: &gtk::Window, menu: Option<&gtk::Popover>) {
         let hover = gtk::EventControllerMotion::new();
-        let paused = self.clone();
+        let hovered = Rc::new(Cell::new(false));
+        let (paused, over) = (self.clone(), hovered.clone());
         hover.connect_enter(move |_, _, _| {
+            over.set(true);
             if let (Some(source), (time, Some(since))) = (paused.timer.take(), paused.left.get()) {
                 source.remove();
                 paused
@@ -262,14 +315,25 @@ impl Countdown {
                     .set((time.saturating_sub(since.elapsed()), None));
             }
         });
-        let resumed = self.clone();
+        // Paused by the hover, not fired; not while the pointer is in the menu.
+        let paused = |c: &Countdown| c.timer.borrow().is_none() && c.left.get().1.is_none();
+        let (resumed, open, over) = (self.clone(), menu.cloned(), hovered.clone());
         hover.connect_leave(move |_| {
-            // Paused by the hover, not fired.
-            if resumed.timer.borrow().is_none() && resumed.left.get().1.is_none() {
+            over.set(false);
+            if paused(&resumed) && !open.as_ref().is_some_and(|m| m.is_visible()) {
                 resumed.resume();
             }
         });
         card.add_controller(hover);
+        let resumed = self.clone();
+        // Closed with the pointer back over the card: still paused.
+        menu.inspect(|m| {
+            m.connect_closed(move |_| {
+                if paused(&resumed) && !hovered.get() {
+                    resumed.resume();
+                }
+            });
+        });
         let pending = self.clone();
         window.connect_destroy(move |_| {
             if let Some(source) = pending.timer.take() {
@@ -299,74 +363,77 @@ pub fn act(
     });
 }
 
-/// A notification's card: its app's icon and name with × after them, then its image (if
-/// sent), summary and body.
-pub fn content(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Box {
-    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    card.add_css_class("card");
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    header.add_css_class("header");
-    if !n.icon.is_empty() {
-        // A URI's path decoded ("%20"), else a path or an icon's name.
-        let path = match n.icon.starts_with("file://") {
-            true => gio::File::for_uri(&n.icon).path(),
-            false => n.icon.starts_with('/').then(|| n.icon.clone().into()),
-        };
-        let icon = match path {
-            Some(path) => gtk::Image::from_file(path),
-            None => gtk::Image::from_icon_name(&n.icon),
-        };
-        header.append(&icon);
-    }
-    let app = gtk::Label::builder()
-        .label(&n.app)
-        .xalign(0.0)
-        .hexpand(true)
-        .ellipsize(pango::EllipsizeMode::End)
-        .build();
-    app.add_css_class("app");
-    header.append(&app);
-    let close = gtk::Button::builder()
-        .icon_name("window-close-symbolic")
-        .css_classes(["close"])
-        .build();
-    let id = n.id;
-    close.update_property(&[gtk::accessible::Property::Label("Dismiss")]);
-    close.connect_clicked(move |_| {
-        let _ = requests.send(Request::Dismiss(id));
-    });
-    header.append(&close);
-    card.append(&header);
+/// A notification's card, as macOS's: its app's icon (full colour, from its desktop file,
+/// else the icon it sent), or its image with the app's icon as a badge on it; the summary,
+/// with the time after it in the history (`times`, to refresh), the body (three lines at
+/// most); `side` (its actions) on the right; × over its top-left corner while the pointer
+/// is over it, named after the summary for screen readers.
+pub fn content(
+    n: &Notification,
+    requests: UnboundedSender<Request>,
+    side: Option<&gtk::Widget>,
+    times: Option<&Times>,
+) -> gtk::Overlay {
     let main = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     main.add_css_class("main");
-    if let Some(image) = &n.image {
-        let format = match image.alpha {
-            true => gdk::MemoryFormat::R8g8b8a8,
-            false => gdk::MemoryFormat::R8g8b8,
-        };
-        let bytes = glib::Bytes::from(&image.pixels[..]);
-        let texture = gdk::MemoryTexture::new(
-            image.width,
-            image.height,
-            format,
-            &bytes,
-            image.rowstride as usize,
-        );
-        let picture = gtk::Image::from_paintable(Some(&texture));
-        picture.add_css_class("picture");
-        main.append(&picture);
+    let slot = gtk::Overlay::new();
+    slot.add_css_class("slot");
+    slot.set_valign(gtk::Align::Start);
+    let icon = app_icon(n);
+    match &n.image {
+        Some(image) => {
+            let format = match image.alpha {
+                true => gdk::MemoryFormat::R8g8b8a8,
+                false => gdk::MemoryFormat::R8g8b8,
+            };
+            let bytes = glib::Bytes::from(&image.pixels[..]);
+            let stride = image.rowstride as usize;
+            let texture =
+                gdk::MemoryTexture::new(image.width, image.height, format, &bytes, stride);
+            let picture = gtk::Image::from_paintable(Some(&texture));
+            picture.add_css_class("picture");
+            slot.set_child(Some(&picture));
+            icon.add_css_class("badge");
+            icon.set_halign(gtk::Align::End);
+            icon.set_valign(gtk::Align::End);
+            slot.add_overlay(&icon);
+        }
+        None => {
+            icon.add_css_class("app-icon");
+            slot.set_child(Some(&icon));
+        }
     }
+    main.append(&slot);
     let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
     text.add_css_class("text");
+    text.set_hexpand(true);
+    let top = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     let summary = gtk::Label::builder()
         .label(&n.summary)
         .xalign(0.0)
+        .hexpand(true)
         .wrap(true)
+        .wrap_mode(pango::WrapMode::WordChar)
+        .lines(2)
+        .ellipsize(pango::EllipsizeMode::End)
         .build();
     summary.add_css_class("summary");
-    text.append(&summary);
+    top.append(&summary);
+    if let Some(times) = times {
+        let time = gtk::Label::new(Some(&ago(n.time)));
+        time.add_css_class("time");
+        top.append(&time);
+        times.borrow_mut().push((time, n.time));
+    }
+    text.append(&top);
     if !n.body.is_empty() {
-        let body = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        let body = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(pango::WrapMode::WordChar)
+            .lines(3)
+            .ellipsize(pango::EllipsizeMode::End)
+            .build();
         // The spec's markup, else (for one that does not parse) the text as it is.
         match pango::parse_markup(&n.body, '\0') {
             Ok(_) => body.set_markup(&n.body),
@@ -375,8 +442,63 @@ pub fn content(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Box
         text.append(&body);
     }
     main.append(&text);
-    card.append(&main);
+    if let Some(side) = side {
+        side.set_valign(gtk::Align::Center);
+        main.append(side);
+    }
+    let card = gtk::Overlay::builder()
+        .child(&main)
+        .css_classes(["card"])
+        .build();
+    let close = gtk::Button::builder()
+        .icon_name("window-close-symbolic")
+        .css_classes(["close"])
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Start)
+        .build();
+    let id = n.id;
+    let name = format!("Dismiss \"{}\"", n.summary);
+    close.update_property(&[gtk::accessible::Property::Label(&name)]);
+    close.connect_clicked(move |_| {
+        let _ = requests.send(Request::Dismiss(id));
+    });
+    card.add_overlay(&close);
     card
+}
+
+/// The app's icon: its desktop file's (`desktop-entry`), else the one it sent (a name, a
+/// path or a `file://` URI), else a generic one.
+fn app_icon(n: &Notification) -> gtk::Image {
+    let desktop = n.desktop_entry.as_ref();
+    let info = desktop.and_then(|e| gio_unix::DesktopAppInfo::new(&format!("{e}.desktop")));
+    if let Some(icon) = info.and_then(|i| i.icon()) {
+        return gtk::Image::from_gicon(&icon);
+    }
+    let path = match n.icon.starts_with("file://") {
+        // A URI's path decoded ("%20").
+        true => gio::File::for_uri(&n.icon).path(),
+        false => n.icon.starts_with('/').then(|| n.icon.clone().into()),
+    };
+    match path {
+        Some(path) => gtk::Image::from_file(path),
+        None if n.icon.is_empty() => gtk::Image::from_icon_name("application-x-executable"),
+        None => gtk::Image::from_icon_name(&n.icon),
+    }
+}
+
+/// The history's times ("5m"), with when each notification came, to refresh.
+pub type Times = RefCell<Vec<(gtk::Label, u64)>>;
+
+/// How long ago `time` (seconds since 1970) was: "now", "5m", "2h", "3d".
+pub fn ago(time: u64) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    let secs = now.map_or(0, |d| d.as_secs()).saturating_sub(time);
+    match secs {
+        0..60 => "now".into(),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    }
 }
 
 /// A horizontal swipe on `widget`, by a drag or by a two-finger touchpad scroll: `moved`

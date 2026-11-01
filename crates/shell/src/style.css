@@ -12,9 +12,9 @@ window {
   --accent-fg: @accent_fg_color;
   --fg: white;
   --tint: rgba(0, 0, 0, 0.35);
+  --close-bg: rgba(60, 60, 60, 0.9);
   --outline: rgba(255, 255, 255, 0.2);
   --hover: rgba(255, 255, 255, 0.2);
-  --field: rgba(255, 255, 255, 0.12);
   --button: rgba(255, 255, 255, 0.15);
   --card: rgba(255, 255, 255, 0.08);
   --track: rgba(255, 255, 255, 0.3);
@@ -22,7 +22,6 @@ window {
   --pill: rgba(255, 255, 255, 0.3);
   --pill-hover: rgba(255, 255, 255, 0.45);
   --dim: 0.7;
-  --off: 0.5;
 
   /* Spacing. */
   --space-xxs: 2px;
@@ -32,23 +31,21 @@ window {
   --space-l: 10px;
   --space-xl: 12px;
   --space-xxl: 16px;
-  --space-xxxl: 24px;
 
   /* Radii, beside the config's two. */
-  --radius-s: 6px;
   --radius-m: 8px;
   --radius-pill: 9999px;
 
   /* Widths and heights. */
   --popover-width: 220px;
   --history-width: 320px;
-  --slider-width: 200px;
   --osd-level-width: 200px;
-  --field-height: 32px;
   --circle-size: 26px;
   --circle-icon-size: 14px;
   --track-height: 6px;
   --picture-size: 40px;
+  --badge-size: 16px;
+  --close-size: 20px;
   --outline-width: 1px;
   --transition: 200ms;
 
@@ -148,17 +145,6 @@ window.bar .face {
   border-spacing: var(--space-xs);
 }
 
-/* VPN's icon while no connection is on. */
-window.bar image.off {
-  opacity: var(--off);
-}
-
-/* A toggle that is on (the night light, keep awake), filled with the accent. */
-window.bar button.toggle.on {
-  background-color: var(--accent);
-  color: var(--accent-fg);
-}
-
 /* A popover: as GNOME apps' menus (adwaita.css: opaque, in the theme's popover colours,
    rounded at `popover-radius`, its rows, switches and sliders libadwaita's), a gap from
    the bar (`popover-gap`), its button keeping its plate while it is open (`:checked`),
@@ -208,10 +194,6 @@ popover.item-popover .circle > label {
 /* The speaker before the volume's slider: a flat button, which mutes. */
 popover.item-popover button.mute {
   all: unset;
-}
-
-popover.item-popover scale {
-  min-width: var(--slider-width);
 }
 
 /* The OSD's level: a white bar on a faint track, round at the ends (the popovers'
@@ -289,8 +271,10 @@ popover.item-popover expander {
   margin: 0 var(--space-s);
 }
 
-/* A notification's banner: frosted as a popover, a little larger; the app's name dim
-   above the summary, in bold, and the body. In the clock's popover, its rows. */
+/* A notification's banner, as macOS's: frosted as the bar, its app's icon (or its image,
+   the icon a badge on it) on the left, the summary in bold with the time after it, the
+   body, its action (or "Options") on the right; × over its corner while hovered. In the
+   clock's popover, its rows. */
 window.notification {
   background-color: var(--tint);
   color: var(--fg);
@@ -299,49 +283,63 @@ window.notification {
   padding: var(--space-l) var(--space-xl);
 }
 
-.card {
-  border-spacing: var(--space-xs);
-}
-
-.card .header,
-.card .actions {
-  border-spacing: var(--space-s);
-}
-
 .card .main {
-  border-spacing: var(--space-m);
+  border-spacing: var(--space-l);
 }
 
 .card .text {
   border-spacing: var(--space-xxs);
 }
 
+.card image.app-icon,
 .card image.picture {
   -gtk-icon-size: var(--picture-size);
 }
 
-.card .app {
-  opacity: var(--dim);
-  font-size: 0.9em;
+.card image.badge {
+  -gtk-icon-size: var(--badge-size);
 }
 
 .card .summary {
   font-weight: 700;
 }
 
-.card button.close,
+.card .time {
+  opacity: var(--dim);
+  font-size: 0.85em;
+  margin-left: var(--space-s);
+}
+
+.card button.close {
+  all: unset;
+  min-width: var(--close-size);
+  min-height: var(--close-size);
+  border-radius: var(--radius-pill);
+  background-color: var(--close-bg);
+  box-shadow: inset 0 0 0 var(--outline-width) var(--outline);
+  -gtk-icon-size: 12px;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.card:hover button.close {
+  opacity: 1;
+}
+
 popover.item-popover button.clear {
   all: unset;
   opacity: var(--dim);
   padding: 0 var(--space-xs);
 }
 
-.card .actions button {
+.card button.action,
+.card menubutton.action > button {
   background: var(--button);
   color: var(--fg);
   border: none;
   box-shadow: none;
   border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-xl);
 }
 
 popover.item-popover .history .card.row {

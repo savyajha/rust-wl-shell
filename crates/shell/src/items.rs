@@ -9,7 +9,7 @@ use shell_core::upower::{Battery, State};
 use shell_core::{niri, xkb};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::popover::{Circle, Item, Row};
+use crate::popover::{Circle, Item, Row, section};
 
 pub struct BatteryItem {
     pub item: Item,
@@ -48,19 +48,7 @@ impl BatteryItem {
             item.content.append(line);
         }
         let power_mode = profiles.map(|requests| {
-            let section = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            let title = gtk::Label::builder()
-                .label("Power Mode")
-                .xalign(0.0)
-                .build();
-            title.add_css_class("title");
-            let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            let degraded = gtk::Label::builder().xalign(0.0).wrap(true).build();
-            degraded.add_css_class("line");
-            section.append(&title);
-            section.append(&rows);
-            section.append(&degraded);
-            section.add_css_class("section");
+            let (section, rows, degraded) = section("Power Mode");
             section.set_visible(false);
             item.content.append(&section);
             PowerMode {
@@ -80,9 +68,7 @@ impl BatteryItem {
     }
 
     pub fn show(&self, battery: Option<&Battery>) {
-        self.item.button.set_visible(battery.is_some());
-        let Some(battery) = battery else {
-            self.item.popover.popdown();
+        let Some(battery) = self.item.state(battery) else {
             return;
         };
         let percent = format!("{}%", battery.percent);
@@ -100,8 +86,7 @@ impl BatteryItem {
         self.icon.set_icon_name(Some(&battery_icon(battery)));
         self.percent.set_label(&percent);
         let name = format!("Battery {percent}, {}", state.to_lowercase());
-        let button = &self.item.button;
-        button.update_property(&[gtk::accessible::Property::Label(&name)]);
+        self.item.set_name(&name);
         for (line, text) in self.lines.iter().zip([&percent, state, &time]) {
             line.set_label(text);
             line.set_visible(!text.is_empty());
@@ -179,8 +164,7 @@ impl LayoutItem {
         // Upper case, as macOS shows it: "DE".
         self.short.set_label(&xkb::short_name(name).to_uppercase());
         let label = format!("Keyboard layout: {name}");
-        let button = &self.item.button;
-        button.update_property(&[gtk::accessible::Property::Label(&label)]);
+        self.item.set_name(&label);
         let niri = self.niri.clone();
         let choose = move |i: usize| {
             let _ = niri.send(niri::Command::SwitchLayout(i as u8));

@@ -18,6 +18,7 @@ use tokio::time;
 use tracing::{debug, info, warn};
 
 use crate::Update;
+use crate::bus;
 
 /// The system's CA bundle: NM's iwd backend refuses `system-ca-certs`, so the bundle is
 /// named as the CA certificate (iwd reads it only if it holds plain certificates).
@@ -25,8 +26,6 @@ const CA_BUNDLE: &str = "file:///etc/ssl/certs/ca-certificates.crt";
 /// How long iwd takes to load the profile NM writes for an enterprise network, before NM
 /// can activate it (measured: at once fails, 1 s works).
 const IWD_LOADS: Duration = Duration::from_secs(1);
-/// Events coming together are read once, after this.
-const SETTLE: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Network {
@@ -171,13 +170,8 @@ async fn follow(nm: NetworkManager, updates: UnboundedSender<Update>) {
         if events.next().await.is_none() {
             return;
         }
-        let settle = time::sleep(SETTLE);
-        tokio::pin!(settle);
-        loop {
-            tokio::select! {
-                () = &mut settle => break,
-                event = events.next() => if event.is_none() { return },
-            }
+        if !bus::settle(&mut events).await {
+            return;
         }
     }
 }

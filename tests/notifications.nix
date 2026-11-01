@@ -5,14 +5,19 @@
 # Behaviours asserted:
 #   1. the shell owns org.freedesktop.Notifications: its server information and
 #      capabilities
-#   2. a banner at the top right of the focused output, below the bar, with the app's
-#      name, the summary and the body's markup; three at most, newest on top
+#   2. a banner at the top right of the focused output, below the bar, as macOS's: its
+#      app's icon in its slot (no app name), the summary and the body's markup; three
+#      at most, newest on top; two actions in "Options"
 #   3. its timeout: 5 s by default; "never" (0) capped (here at 2 s) for a non-critical
 #      one; a critical one stays; each leaves for the history (a transient one does not)
 #   4. replaces_id replaces, in the banner and the history
 #   5. an app's CloseNotification removes the banner and the history entry (closed, 3)
 #   6. a click runs the default action, with an ActivationToken first; a button its
-#      action; both reach the app (notify-send --wait) and close the notification
+#      action; with three, "Options" opens a menu of them, one of which reaches the app;
+#      all close the notification; x shows over a banner's corner while hovered, and
+#      dismisses it (closed, 2), as does its x named after the summary, through AT-SPI;
+#      the Options menu takes the keyboard: Escape closes it, and typing reaches the
+#      window again
 #   7. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2)
 #   8. the history in the clock's popover, grouped by app; × and "Clear all"; the
 #      keyboard released when it closes
@@ -22,7 +27,8 @@
 #      for a window past those shown (as a client with a stale count asks) answers, and
 #      the shell does not crash (GTK 4.22 answers with its last window, which a hidden
 #      banner's window, its accessible unrealized, crashed it)
-#   9. Do Not Disturb: no banners (but critical ones), the history still fills; a
+#   9. Do Not Disturb: its indicator beside the clock only while on; no banners (but
+#      critical ones), the history still fills; a
 #      transient one closed after its id is sent (notify-send --wait returns); it and
 #      the history survive a restart of the shell
 #  11. with both outputs off (no bar left), the shell's AT-SPI root asked for windows 0
@@ -121,31 +127,37 @@ pkgs.testers.runNixOSTest {
         as_user(NOTIFY + "-i mail-unread-symbolic 'Lunch?' 'Free at <b>one</b>?'")
         wait_for_tree(banner_shown("Lunch?"), "the banner")
         t = tree()
-        assert has("label", "Mail")(t) and has("label", "Free at one?")(t), t
+        # No app name on a banner, as macOS's: its icon instead.
+        assert lacks("label", "Mail")(t) and has("label", "Free at one?")(t), t
         move(100, 700)
         time.sleep(0.5)
         shot = screen()
+        # The icon's slot, on the left (40 px, after the padding): the theme's mail icon.
+        left = 1024 - 8 - 360
+        slot = [pixel(shot, x, y) for x in range(left + 14, left + 52) for y in range(HEIGHT + 20, HEIGHT + 58)]
+        assert any(min(p) > 150 for p in slot), "no icon in its slot"
         machine.send_monitor_command(f"screendump {machine.out_dir}/banner.ppm gpu 0")
         # Below the bar, 8 px from the right edge: tinted, not niri's grey.
         assert not is_grey(pixel(shot, 1024 - 8 - 180, HEIGHT + 30)), "no banner"
         assert is_grey(pixel(shot, 1024 - 4, HEIGHT + 30)), "the banner at the edge"
         for summary in ["Two", "Three"]:
             as_user(NOTIFY + f"-t 20000 {summary} body")
-        # The newest, taller with its buttons.
+        # The newest, its two actions in a menu ("Options").
         background("notify-send -a Mail -A yes=Yes -A no=No -t 20000 Four body", "/tmp/four")
         wait_for_tree(banner_shown("Four"), "the fourth banner")
+        assert has("toggle button", "Options")(tree()), "no Options"
         t = tree()
         shown = {n for _, n in t if n in ("Lunch?", "Two", "Three", "Four")}
         assert shown == {"Four", "Three", "Two"}, shown
         machine.send_monitor_command(f"screendump {machine.out_dir}/stack.ppm gpu 0")
-        # On top, the tallest: the first gap between banners comes late.
+        # Stacked from the top: the first gap between banners after the first one.
         move(100, 700)
         time.sleep(0.5)
         shot = screen()
         x = 1024 - 8 - 180
         gap = next(y for y in range(HEIGHT + 10, 700) if is_grey(pixel(shot, x, y)))
         print(f"the first gap at {gap}")
-        assert gap - (HEIGHT + 8) > 90, gap
+        assert 50 < gap - (HEIGHT + 8) < 120, gap
         assert "Lunch?" in history()
         machine.send_monitor_command(f"screendump {machine.out_dir}/history.ppm gpu 0")
         close_history()
@@ -237,6 +249,48 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(has("button", "Yes"), "the button")
         act("Yes")
         machine.wait_until_succeeds("grep -q yes /tmp/button", timeout=10)
+        # Two or more: "Options", a menu of them.
+        background("notify-send -a Chat -A a=Alpha -A b=Beta -A c=Gamma --wait -t 20000 Menu body", "/tmp/menu")
+        wait_for_tree(has("toggle button", "Options"), "Options")
+        act("Options", "toggle button")
+        wait_for_tree(has("button", "Beta"), "the actions' menu")
+        # It has the keyboard: Escape closes it, and typing reaches the window again.
+        machine.send_key("esc")
+        wait_for_tree(lacks("button", "Beta"), "the menu closed by Escape")
+        typing_reaches_the_window("after-options")
+        act("Options", "toggle button")
+        wait_for_tree(has("button", "Beta"), "the actions' menu again")
+        machine.send_monitor_command(f"screendump {machine.out_dir}/options.ppm gpu 0")
+        act("Beta", "button")
+        machine.wait_until_succeeds("grep -qx b /tmp/menu", timeout=10)
+        wait_for_tree(banner_gone("Menu"), "closed once acted on")
+        retry(lambda _: keyboard_free(), 10)
+
+    with subtest("x shows over a banner's corner while hovered, and dismisses it"):
+        nid = as_user(NOTIFY + "-p -t 20000 Hovered body").strip()
+        wait_for_tree(banner_shown("Hovered"), "the banner")
+        # x over the card's top-left corner (after the banner's padding).
+        corner = [(x, y) for x in range(1024 - 8 - 360 + 14, 1024 - 8 - 360 + 32) for y in range(HEIGHT + 20, HEIGHT + 38)]
+        move(100, 700)
+        time.sleep(0.5)
+        away = screen()
+        move(1024 - 8 - 200, HEIGHT + 40)
+        time.sleep(0.8)
+        over = screen()
+        changed = [(x, y) for x, y in corner if pixel(away, x, y) != pixel(over, x, y)]
+        assert len(changed) > 20, "no x on hover"
+        # A click on it (in the middle of the changed pixels).
+        xs, ys = [x for x, _ in changed], [y for _, y in changed]
+        click((min(xs) + max(xs)) // 2, (min(ys) + max(ys)) // 2)
+        wait_for_tree(banner_gone("Hovered"), "dismissed by its x")
+        assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
+        move(100, 700)
+        # For a screen reader, each x is named after its notification.
+        nid = as_user(NOTIFY + "-p -t 20000 Named body").strip()
+        wait_for_tree(has("button", 'Dismiss "Named"'), "its x, by name")
+        act('Dismiss "Named"')
+        wait_for_tree(banner_gone("Named"), "dismissed through AT-SPI")
+        assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
 
     with subtest("a swipe dismisses: a drag, and a horizontal scroll"):
         nid = as_user(NOTIFY + "-p -t 20000 Dragged body").strip()
@@ -268,9 +322,12 @@ pkgs.testers.runNixOSTest {
 
     with subtest("Do Not Disturb, kept with the history over a restart"):
         history()
+        assert lacks("image", "Do Not Disturb")(tree()), "the indicator with it off"
         act("Do Not Disturb", "switch")
         machine.wait_until_succeeds("grep -q '\"dnd\":true' /home/${session.user}/.local/state/rust-wl-shell/notifications.json")
         close_history()
+        # Beside the clock while it is on, as macOS's Focus moon.
+        wait_for_tree(has("image", "Do Not Disturb"), "the Do Not Disturb indicator")
         as_user(NOTIFY + "-t 20000 Quiet body")
         time.sleep(2)
         assert banner_gone("Quiet")(tree()), "a banner with Do Not Disturb"
@@ -292,6 +349,7 @@ pkgs.testers.runNixOSTest {
         as_user(NOTIFY + "-t 20000 'Still quiet' body")
         time.sleep(2)
         assert banner_gone("Still quiet")(tree()), "Do Not Disturb forgotten"
+        assert has("image", "Do Not Disturb")(tree()), "no indicator after the restart"
         assert "Still quiet" in history()
         close_history()
 

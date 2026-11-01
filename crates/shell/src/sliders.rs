@@ -8,7 +8,7 @@ use gtk4::{self as gtk, prelude::*};
 use shell_core::audio::{self, Audio, Kind, Output, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::popover::{Circle, Item, Row, Slider};
+use crate::popover::{Circle, Item, Row, Slider, title};
 
 pub struct VolumeItem {
     pub item: Item,
@@ -57,9 +57,7 @@ impl VolumeItem {
     }
 
     pub fn show(&self, audio: Option<&Audio>) {
-        self.item.button.set_visible(audio.is_some());
-        let Some(audio) = audio else {
-            self.item.popover.popdown();
+        let Some(audio) = self.item.state(audio) else {
             return;
         };
         self.icon.set_icon_name(Some(volume_icon(audio)));
@@ -67,8 +65,7 @@ impl VolumeItem {
             true => "Volume muted".to_string(),
             false => format!("Volume {}%", audio.volume),
         };
-        let button = &self.item.button;
-        button.update_property(&[gtk::accessible::Property::Label(&name)]);
+        self.item.set_name(&name);
         self.slider.show(audio.volume);
         self.muted.set(audio.muted);
         let (icon, action) = match audio.muted {
@@ -126,14 +123,11 @@ impl BrightnessItem {
     }
 
     pub fn show(&self, level: Option<u8>) {
-        self.item.button.set_visible(level.is_some());
-        let Some(level) = level else {
-            self.item.popover.popdown();
+        let Some(level) = self.item.state(level) else {
             return;
         };
         let name = format!("Brightness {level}%");
-        let button = &self.item.button;
-        button.update_property(&[gtk::accessible::Property::Label(&name)]);
+        self.item.set_name(&name);
         self.slider.show(level.into());
     }
 }
@@ -159,12 +153,6 @@ pub fn volume_icon(audio: &Audio) -> &'static str {
         34..67 => "audio-volume-medium-symbolic",
         _ => "audio-volume-high-symbolic",
     }
-}
-
-fn title(text: &str) -> gtk::Label {
-    let title = gtk::Label::builder().label(text).xalign(0.0).build();
-    title.add_css_class("title");
-    title
 }
 
 #[cfg(test)]

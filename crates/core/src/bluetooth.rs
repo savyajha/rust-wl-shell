@@ -3,11 +3,8 @@
 //! battery when BlueZ knows it; switching the adapter, connecting and disconnecting. BlueZ's
 //! objects are read whole again on any signal it sends, and when it starts or stops.
 
-use std::time::Duration;
-
 use futures_lite::StreamExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::time;
 use tracing::{debug, info, warn};
 use zbus::fdo::{self, ManagedObjects};
 use zbus::message::Type;
@@ -22,8 +19,6 @@ const BLUEZ: &str = "org.bluez";
 const ADAPTER: &str = "org.bluez.Adapter1";
 const DEVICE: &str = "org.bluez.Device1";
 const BATTERY: &str = "org.bluez.Battery1";
-/// Signals coming together are read once, after this.
-const SETTLE: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bluetooth {
@@ -103,13 +98,8 @@ async fn follow(bus: &zbus::Connection, updates: &UnboundedSender<Update>) -> zb
             signal = signals.next() => if signal.is_none() { return Ok(()) },
             owner = owners.next() => if owner.is_none() { return Ok(()) },
         }
-        let settle = time::sleep(SETTLE);
-        tokio::pin!(settle);
-        loop {
-            tokio::select! {
-                () = &mut settle => break,
-                signal = signals.next() => if signal.is_none() { return Ok(()) },
-            }
+        if !bus::settle(&mut signals).await {
+            return Ok(());
         }
     }
 }

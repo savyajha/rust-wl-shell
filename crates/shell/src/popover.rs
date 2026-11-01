@@ -45,6 +45,21 @@ impl Item {
         }
     }
 
+    /// Shown with `state`, hidden (its popover closed) without; `state`, to show.
+    pub fn state<T>(&self, state: Option<T>) -> Option<T> {
+        self.button.set_visible(state.is_some());
+        if state.is_none() {
+            self.popover.popdown();
+        }
+        state
+    }
+
+    /// Its name for screen readers ("Volume 40%").
+    pub fn set_name(&self, name: &str) {
+        let label = gtk::accessible::Property::Label(name);
+        self.button.update_property(&[label]);
+    }
+
     /// Replace the rows in `rows` (part of the content) with `entries`; a click on one
     /// calls `choose` with its index and closes. A row is a flat button: a round icon
     /// (filled with the accent when chosen), its label, and what comes after it. In a list
@@ -225,4 +240,25 @@ impl Switch {
         self.switch.set_active(on);
         self.switch.set_state(on);
     }
+}
+
+/// A popover's title: bold, at the start.
+pub fn title(text: &str) -> gtk::Label {
+    let title = gtk::Label::builder().label(text).xalign(0.0).build();
+    title.add_css_class("title");
+    title
+}
+
+/// A section of a popover: its `title`, then its rows, then a note (none, until it has a
+/// text: "No devices").
+pub fn section(text: &str) -> (gtk::Box, gtk::Box, gtk::Label) {
+    let section = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    section.add_css_class("section");
+    let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let note = gtk::Label::builder().xalign(0.0).wrap(true).build();
+    note.add_css_class("line");
+    section.append(&title(text));
+    section.append(&rows);
+    section.append(&note);
+    (section, rows, note)
 }

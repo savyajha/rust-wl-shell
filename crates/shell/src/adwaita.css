@@ -144,18 +144,6 @@ window.dialog entry:focus-within {
   outline-offset: -2px;
 }
 
-window.dialog entry.error {
-  color: var(--dialog-error);
-}
-
-window.dialog entry.error:focus-within {
-  outline-color: color-mix(in srgb, var(--dialog-error) 50%, transparent);
-}
-
-window.dialog entry:disabled {
-  filter: opacity(50%);
-}
-
 window.dialog entry > text > placeholder {
   color: inherit;
   opacity: 55%;
@@ -181,14 +169,6 @@ window.dialog entry > image:hover {
 
 window.dialog entry > image:active {
   opacity: 80%;
-}
-
-window.dialog entry > image.left {
-  margin-right: 6px;
-}
-
-window.dialog entry > image.right {
-  margin-left: 6px;
 }
 
 /* The options' disclosure. */
@@ -284,10 +264,6 @@ popover.item-popover switch:focus:focus-visible {
   outline-color: color-mix(in srgb, @accent_color 50%, transparent);
   outline-width: 2px;
   outline-offset: 1px;
-}
-
-popover.item-popover switch:disabled {
-  filter: opacity(50%);
 }
 
 popover.item-popover switch > slider {

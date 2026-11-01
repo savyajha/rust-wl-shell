@@ -39,6 +39,9 @@ pub struct Notification {
     pub app: String,
     /// An icon name, or a file's path; empty for none.
     pub icon: String,
+    /// The app's desktop file's name, without `.desktop` (the `desktop-entry` hint).
+    #[serde(default)]
+    pub desktop_entry: Option<String>,
     pub summary: String,
     /// In the spec's markup (b, i, u, a).
     pub body: String,
@@ -419,6 +422,7 @@ fn notification(
             .find_map(|name| hints.get(*name)?.try_clone().ok())
     };
     let origin = hint(&["x-kde-origin-name"]).and_then(|v| String::try_from(v).ok());
+    let desktop_entry = hint(&["desktop-entry"]).and_then(|v| String::try_from(v).ok());
     let critical = hint(&["urgency"]).and_then(|v| u8::try_from(v).ok()) == Some(2);
     // A boolean, or (as some apps send it) an integer.
     let transient = hints.get("transient").is_some_and(|v| {
@@ -436,6 +440,7 @@ fn notification(
             _ => app,
         },
         icon: image_path.filter(|_| icon.is_empty()).unwrap_or(icon),
+        desktop_entry: desktop_entry.filter(|e| !e.is_empty()),
         summary: cut(summary, SUMMARY),
         body: cut(without_links(&body), BODY),
         time,

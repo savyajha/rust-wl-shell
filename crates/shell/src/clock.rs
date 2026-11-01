@@ -10,12 +10,14 @@ use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::notifications::{Banners, act, content, swipe};
-use crate::popover::{Item, Switch};
+use crate::notifications::{Banners, Times, act, ago, content, swipe};
+use crate::popover::{Item, Switch, title};
 
 pub struct ClockItem {
     pub item: Item,
     pub label: gtk::Label,
+    /// Beside the time while Do Not Disturb is on, as macOS's Focus moon.
+    dnd_icon: gtk::Image,
     dnd: Switch,
     /// "Notifications" and "Clear all", then the groups.
     header: gtk::Box,
@@ -25,6 +27,8 @@ pub struct ClockItem {
     requests: UnboundedSender<Request>,
     /// A swipe's distance to dismiss a notification.
     swipe: f64,
+    /// The rows' times ("5m"), brought up to date when the popover shows.
+    times: Rc<Times>,
 }
 
 impl ClockItem {
@@ -37,7 +41,14 @@ impl ClockItem {
     ) -> Self {
         let label = gtk::Label::new(None);
         label.add_css_class("clock");
-        let item = Item::new(&label, "Clock");
+        let dnd_icon = gtk::Image::from_icon_name("notifications-disabled-symbolic");
+        dnd_icon.set_visible(false);
+        dnd_icon.update_property(&[gtk::accessible::Property::Label("Do Not Disturb")]);
+        let face = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        face.add_css_class("face");
+        face.append(&dnd_icon);
+        face.append(&label);
+        let item = Item::new(&face, "Clock");
         item.button.set_visible(true);
         let requests = notifications
             .clone()
@@ -87,9 +98,14 @@ impl ClockItem {
         }
         item.content.add_css_class("history");
         // The banners out of its way while it is open.
-        let hidden = banners.clone();
-        item.popover
-            .connect_show(move |_| hidden.borrow_mut().hide(true));
+        let (hidden, times) = (banners.clone(), Rc::<Times>::default());
+        let shown_times = times.clone();
+        item.popover.connect_show(move |_| {
+            hidden.borrow_mut().hide(true);
+            for (label, time) in shown_times.borrow().iter() {
+                label.set_label(&ago(*time));
+            }
+        });
         let shown = banners.clone();
         item.popover
             .connect_closed(move |_| shown.borrow_mut().hide(false));
@@ -103,6 +119,7 @@ impl ClockItem {
         Self {
             item,
             label,
+            dnd_icon,
             dnd,
             header,
             groups,
@@ -110,11 +127,13 @@ impl ClockItem {
             shown: None,
             requests,
             swipe: f64::from(config.swipe_distance),
+            times,
         }
     }
 
     pub fn show(&mut self, state: &Notifications) {
         self.dnd.show(state.dnd);
+        self.dnd_icon.set_visible(state.dnd);
         if self
             .shown
             .as_ref()
@@ -125,15 +144,14 @@ impl ClockItem {
         self.shown = Some(state.clone());
         self.header.set_visible(!state.history.is_empty());
         self.empty.set_visible(state.history.is_empty());
+        self.times.borrow_mut().clear();
         while let Some(child) = self.groups.first_child() {
             self.groups.remove(&child);
         }
         for (app, notifications) in groups(&state.history) {
             let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
             group.add_css_class("group");
-            let title = gtk::Label::builder().label(app).xalign(0.0).build();
-            title.add_css_class("title");
-            group.append(&title);
+            group.append(&title(app));
             for n in notifications {
                 group.append(&self.row(n));
             }
@@ -143,8 +161,8 @@ impl ClockItem {
 
     /// A notification's row: its card, swiped away as a banner, a click on it its default
     /// action (when it still has one: not after a restart).
-    fn row(&self, n: &Notification) -> gtk::Box {
-        let card = content(n, self.requests.clone());
+    fn row(&self, n: &Notification) -> gtk::Overlay {
+        let card = content(n, self.requests.clone(), None, Some(&self.times));
         card.add_css_class("row");
         let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);
@@ -167,7 +185,7 @@ impl ClockItem {
 }
 
 /// A row following a swipe: shifted by its margins, and fading.
-fn follow_swipe(card: &gtk::Box, distance: f64) -> impl Fn(f64) + Clone + 'static {
+fn follow_swipe(card: &gtk::Overlay, distance: f64) -> impl Fn(f64) + Clone + 'static {
     let card = card.downgrade();
     move |dx: f64| {
         if let Some(card) = card.upgrade() {
