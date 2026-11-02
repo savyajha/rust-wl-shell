@@ -29,8 +29,7 @@ pub struct Config {
     pub active_pill_width: Option<u32>,
     #[knuffel(child, unwrap(argument))]
     pub pill_gap: Option<u32>,
-    /// The popovers' corners' radius (libadwaita's), and the banners' (KDL, not CSS: the
-    /// blur behind them follows it).
+    /// The popovers' corners' radius (libadwaita's), and the banners'.
     #[knuffel(child, unwrap(argument), default = 15)]
     pub popover_radius: u32,
     #[knuffel(child, unwrap(argument), default = 14)]
@@ -111,8 +110,8 @@ pub struct Config {
     /// critical ones stay until dismissed.
     #[knuffel(child, unwrap(argument), default = 10)]
     pub notification_max_timeout: u32,
-    /// The banners and the OSD left to niri's `layer-rule`s for their blur (its
-    /// corners smooth), rather than blurred by the shell (README).
+    /// The OSD left to niri's `layer-rule` for its blur (its corners smooth), rather than
+    /// blurred by the shell (README).
     #[knuffel(child, unwrap(argument), default = false)]
     pub niri_blur_rule: bool,
     /// The power menu, after the clock.

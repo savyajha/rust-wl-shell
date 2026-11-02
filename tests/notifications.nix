@@ -5,17 +5,18 @@
 # Behaviours asserted:
 #   1. the shell owns org.freedesktop.Notifications: its server information and
 #      capabilities
-#   2. a banner at the top right of the focused output, below the bar, as macOS's: its
-#      app's icon in its slot (no app name), the summary and the body's markup; three
-#      at most, newest on top; two actions in "Options"
+#   2. a banner at the top right of the focused output, below the bar, as macOS's: opaque
+#      in the popovers' colour, its app's icon in its slot (no app name), the summary and
+#      the body's markup; three at most, newest on top, their cards 8 px apart; two
+#      actions in "Options"
 #   3. its timeout: 5 s by default; "never" (0) capped (here at 2 s) for a non-critical
 #      one; a critical one stays; each leaves for the history (a transient one does not)
 #   4. replaces_id replaces, in the banner and the history
 #   5. an app's CloseNotification removes the banner and the history entry (closed, 3)
 #   6. a click runs the default action, with an ActivationToken first; a button its
 #      action; with three, "Options" opens a menu of them, one of which reaches the app;
-#      all close the notification; x shows over a banner's corner while hovered, and
-#      dismisses it (closed, 2), as does its x named after the summary, through AT-SPI;
+#      all close the notification; x shows centred on a banner's top-right corner while
+#      hovered, and dismisses it (closed, 2), as does its x named after the summary, through AT-SPI;
 #      the Options menu takes the keyboard: Escape closes it, and typing reaches the
 #      window again
 #   7. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2)
@@ -132,14 +133,17 @@ pkgs.testers.runNixOSTest {
         move(100, 700)
         time.sleep(0.5)
         shot = screen()
+        # The card: 10 px from the right edge and below the bar (the gap, 8, is less than
+        # half the x over its corner), 360 wide.
+        left, top = 1024 - 10 - 360, HEIGHT + 10
         # The icon's slot, on the left (40 px, after the padding): the theme's mail icon.
-        left = 1024 - 8 - 360
         slot = [pixel(shot, x, y) for x in range(left + 14, left + 52) for y in range(HEIGHT + 20, HEIGHT + 58)]
         assert any(min(p) > 150 for p in slot), "no icon in its slot"
         machine.send_monitor_command(f"screendump {machine.out_dir}/banner.ppm gpu 0")
-        # Below the bar, 8 px from the right edge: tinted, not niri's grey.
-        assert not is_grey(pixel(shot, 1024 - 8 - 180, HEIGHT + 30)), "no banner"
-        assert is_grey(pixel(shot, 1024 - 4, HEIGHT + 30)), "the banner at the edge"
+        # Opaque, in libadwaita's dark popover colour (in its padding, clear of the text);
+        # the margin beside it clear, niri's grey.
+        assert is_popover(pixel(shot, 1024 - 16, top + 20)), "no opaque banner"
+        assert is_grey(pixel(shot, 1024 - 4, top + 20)), "the banner at the edge"
         for summary in ["Two", "Three"]:
             as_user(NOTIFY + f"-t 20000 {summary} body")
         # The newest, its two actions in a menu ("Options").
@@ -155,9 +159,12 @@ pkgs.testers.runNixOSTest {
         time.sleep(0.5)
         shot = screen()
         x = 1024 - 8 - 180
-        gap = next(y for y in range(HEIGHT + 10, 700) if is_grey(pixel(shot, x, y)))
+        gap = next(y for y in range(top, 700) if is_grey(pixel(shot, x, y)))
         print(f"the first gap at {gap}")
-        assert 50 < gap - (HEIGHT + 8) < 120, gap
+        assert 50 < gap - top < 120, gap
+        # The next card 8 px (the gap) after it, the room for its x overlapping.
+        after = next(y for y in range(gap, 700) if not is_grey(pixel(shot, x, y)))
+        assert after - gap == 8, (gap, after)
         assert "Lunch?" in history()
         machine.send_monitor_command(f"screendump {machine.out_dir}/history.ppm gpu 0")
         close_history()
@@ -266,11 +273,12 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(banner_gone("Menu"), "closed once acted on")
         retry(lambda _: keyboard_free(), 10)
 
-    with subtest("x shows over a banner's corner while hovered, and dismisses it"):
+    with subtest("x shows on a banner's top-right corner while hovered, and dismisses it"):
         nid = as_user(NOTIFY + "-p -t 20000 Hovered body").strip()
         wait_for_tree(banner_shown("Hovered"), "the banner")
-        # x over the card's top-left corner (after the banner's padding).
-        corner = [(x, y) for x in range(1024 - 8 - 360 + 14, 1024 - 8 - 360 + 32) for y in range(HEIGHT + 20, HEIGHT + 38)]
+        # The card's top-right corner, and around it.
+        cx, cy = 1024 - 10, HEIGHT + 10
+        corner = [(x, y) for x in range(cx - 14, 1024) for y in range(cy - 10, cy + 14)]
         move(100, 700)
         time.sleep(0.5)
         away = screen()
@@ -279,9 +287,13 @@ pkgs.testers.runNixOSTest {
         over = screen()
         changed = [(x, y) for x, y in corner if pixel(away, x, y) != pixel(over, x, y)]
         assert len(changed) > 20, "no x on hover"
-        # A click on it (in the middle of the changed pixels).
+        # Centred on the corner: the middle of the changed pixels (20 px across).
         xs, ys = [x for x, _ in changed], [y for _, y in changed]
-        click((min(xs) + max(xs)) // 2, (min(ys) + max(ys)) // 2)
+        middle = ((min(xs) + max(xs) + 1) / 2, (min(ys) + max(ys) + 1) / 2)
+        print(f"x from {min(xs)},{min(ys)} to {max(xs)},{max(ys)}")
+        assert abs(middle[0] - cx) <= 1 and abs(middle[1] - cy) <= 1, middle
+        # A click on it.
+        click(cx, cy)
         wait_for_tree(banner_gone("Hovered"), "dismissed by its x")
         assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
         move(100, 700)

@@ -1,7 +1,8 @@
 /* The shell's look. Every value is a variable, defined once here; a user's stylesheet,
    $XDG_CONFIG_HOME/rust-wl-shell/style.css, overrides them in its own `window { }` rule
    (README). The config's sizes come before this file as variables too: --height,
-   --font-size, --icon-size, --spacing, --popover-radius and --panel-radius. */
+   --font-size, --icon-size, --spacing, --popover-radius and --panel-radius; and the ×'s
+   size, --close-size, which the banners' layout follows (notifications.rs). */
 
 /* The named colours used here (the accent, the dialog's) are the GTK theme's, a gtk.css's
    (matugen's, for one) over it, else fallback.css's. */
@@ -15,12 +16,13 @@ window {
   --close-bg: rgba(60, 60, 60, 0.9);
   --outline: rgba(255, 255, 255, 0.2);
   --hover: rgba(255, 255, 255, 0.2);
-  --button: rgba(255, 255, 255, 0.15);
   --card: rgba(255, 255, 255, 0.08);
   --track: rgba(255, 255, 255, 0.3);
   --level: white;
   --pill: rgba(255, 255, 255, 0.3);
   --pill-hover: rgba(255, 255, 255, 0.45);
+  /* A fixed green, not the theme's success colour (matugen's may not be green). */
+  --badge-ok: #2ec27e;
   --dim: 0.7;
 
   /* Spacing. */
@@ -45,7 +47,6 @@ window {
   --track-height: 6px;
   --picture-size: 40px;
   --badge-size: 16px;
-  --close-size: 20px;
   --outline-width: 1px;
   --transition: 200ms;
 
@@ -69,6 +70,13 @@ window {
   /* The popovers, as libadwaita's: opaque, in the theme's popover colours. */
   --popover-bg: @popover_bg_color;
   --popover-fg: @popover_fg_color;
+
+  /* The banners, as the popovers: opaque, in the theme's popover colours, outlined as
+     libadwaita's popovers are. */
+  --banner-bg: @popover_bg_color;
+  --banner-fg: @popover_fg_color;
+  --banner-outline: rgba(0, 0, 0, 0.14);
+  --banner-button: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 /* The bar: macOS's dark menu bar, a translucent tint over the compositor's blur, with white
@@ -88,6 +96,18 @@ window.bar .left {
 
 window.bar image {
   -gtk-icon-size: var(--icon-size);
+}
+
+/* The VPN's badge while one is on: a green circle with a white tick on the icon's corner
+   (its own colours, not the bar's), ringed in the bar's tint as if cut out of the icon;
+   half the icon's size. */
+window.bar image.vpn-badge {
+  -gtk-icon-size: calc(var(--icon-size) * 3 / 8);
+  padding: calc(var(--icon-size) / 16);
+  border-radius: var(--radius-pill);
+  background-color: var(--badge-ok);
+  color: white;
+  box-shadow: 0 0 0 calc(var(--icon-size) / 16) var(--tint);
 }
 
 /* A workspace: a pill (vibepanel's), faint white, or filled with the accent when it is
@@ -271,14 +291,18 @@ popover.item-popover expander {
   margin: 0 var(--space-s);
 }
 
-/* A notification's banner, as macOS's: frosted as the bar, its app's icon (or its image,
-   the icon a badge on it) on the left, the summary in bold with the time after it, the
-   body, its action (or "Options") on the right; × over its corner while hovered. In the
-   clock's popover, its rows. */
+/* A notification's banner, as macOS's: an opaque card (the window around it clear, room
+   for the × on its top-right corner), its app's icon (or its image, the icon a badge on
+   it) on the left, the summary in bold, the body, its action (or "Options") on the right;
+   × while hovered. In the clock's popover, its rows, with the time after the summary. */
 window.notification {
-  background-color: var(--tint);
-  color: var(--fg);
-  border: var(--outline-width) solid var(--outline);
+  background: none;
+}
+
+.banner > .card {
+  background-color: var(--banner-bg);
+  color: var(--banner-fg);
+  border: var(--outline-width) solid var(--banner-outline);
   border-radius: var(--panel-radius);
   padding: var(--space-l) var(--space-xl);
 }
@@ -310,7 +334,8 @@ window.notification {
   margin-left: var(--space-s);
 }
 
-.card button.close {
+.card button.close,
+.banner > button.close {
   all: unset;
   min-width: var(--close-size);
   min-height: var(--close-size);
@@ -322,7 +347,8 @@ window.notification {
   transition: opacity var(--transition);
 }
 
-.card:hover button.close {
+.card:hover button.close,
+.banner:hover > button.close {
   opacity: 1;
 }
 
@@ -334,8 +360,8 @@ popover.item-popover button.clear {
 
 .card button.action,
 .card menubutton.action > button {
-  background: var(--button);
-  color: var(--fg);
+  background: var(--banner-button);
+  color: inherit;
   border: none;
   box-shadow: none;
   border-radius: var(--radius-pill);

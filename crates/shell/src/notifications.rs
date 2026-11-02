@@ -1,22 +1,23 @@
-//! Notifications on screen: the banners, each a frosted panel of its own on the overlay
+//! Notifications on screen: the banners, each an opaque panel of its own on the overlay
 //! layer of the focused output, at the configured corner, newest nearest it; and what
-//! banners and the clock popover's history share: a notification's content, and the swipe
-//! that dismisses one.
+//! banners and the clock popover's history share: a notification's content, its ×, and the
+//! swipe that dismisses one.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gtk4::{self as gtk, gdk, gio, glib, pango, prelude::*};
+use gtk4::{self as gtk, cairo, gdk, gio, glib, pango, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use shell_core::config::{Config, Corner};
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::blur::{Blur, Corners};
-
 /// Between a banner and its menu ("Options").
 const MENU_GAP: i32 = 6;
+/// The ×'s size (the stylesheet's `--close-size`, set from here): a banner's window has
+/// half of it around its card's top and right, for its × centred on the card's corner.
+pub const CLOSE_SIZE: i32 = 20;
 
 /// A banner's pending timeout, if it has one.
 type Timer = Rc<RefCell<Option<glib::SourceId>>>;
@@ -38,7 +39,6 @@ pub struct Banners {
     width: i32,
     swipe: f64,
     requests: UnboundedSender<Request>,
-    blur: Option<Rc<Blur>>,
     /// Newest first, as shown, each with its window (none while hidden) and countdown
     /// (none for one that stays).
     shown: Vec<(Notification, Option<gtk::Window>, Option<Countdown>)>,
@@ -50,18 +50,13 @@ pub struct Banners {
 }
 
 impl Banners {
-    pub fn new(
-        config: &Config,
-        requests: UnboundedSender<Request>,
-        blur: Option<Rc<Blur>>,
-    ) -> Self {
+    pub fn new(config: &Config, requests: UnboundedSender<Request>) -> Self {
         Self {
             corner: config.notification_position,
             gap: config.notification_gap as i32,
             width: config.notification_width as i32,
             swipe: f64::from(config.swipe_distance),
             requests,
-            blur,
             shown: Vec::new(),
             hidden: false,
         }
@@ -126,21 +121,24 @@ impl Banners {
         self.stack();
     }
 
-    /// The banners shown stacked from the corner, a gap apart.
+    /// The banners shown stacked from the corner, their cards a gap apart (and from the
+    /// edge: less the room for the × above each card, as far as the edge lets it).
     fn stack(&self) {
-        let vertical = match self.corner {
-            Corner::TopLeft | Corner::Top | Corner::TopRight => Edge::Top,
-            _ => Edge::Bottom,
+        let (vertical, mut offset) = match self.corner {
+            Corner::TopLeft | Corner::Top | Corner::TopRight => {
+                (Edge::Top, (self.gap - CLOSE_SIZE / 2).max(0))
+            }
+            _ => (Edge::Bottom, self.gap),
         };
-        let mut offset = self.gap;
+        let width = self.width + CLOSE_SIZE / 2;
         for window in self
             .shown
             .iter()
             .filter_map(|(_, window, _)| window.as_ref())
         {
             window.set_margin(vertical, offset);
-            let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, self.width);
-            offset += height + self.gap;
+            let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, width);
+            offset += height + self.gap - CLOSE_SIZE / 2;
         }
     }
 
@@ -152,7 +150,7 @@ impl Banners {
     ) -> gtk::Window {
         let window = gtk::Window::builder()
             .css_classes(["notification"])
-            .default_width(self.width)
+            .default_width(self.width + CLOSE_SIZE / 2)
             .build();
         window.init_layer_shell();
         window.set_namespace(Some("rust-wl-shell-notification"));
@@ -168,9 +166,14 @@ impl Banners {
             Corner::BottomRight => (Edge::Bottom, Some(Edge::Right)),
         };
         window.set_anchor(vertical, true);
+        // From the edge: the card a gap away, the × beside it as far as the edge lets it.
+        let margin = match horizontal {
+            Some(Edge::Right) => (self.gap - CLOSE_SIZE / 2).max(0),
+            _ => self.gap,
+        };
         if let Some(edge) = horizontal {
             window.set_anchor(edge, true);
-            window.set_margin(edge, self.gap);
+            window.set_margin(edge, margin);
         }
         let requests = self.requests.clone();
         let id = n.id;
@@ -221,7 +224,7 @@ impl Banners {
         if let Some(side) = &side {
             side.add_css_class("action");
         }
-        let card = content(n, requests.clone(), side.as_ref(), None);
+        let card = content(n, side.as_ref(), None);
         if let (Some(menu), Some(button)) = (&menu, &side) {
             // The menu takes the keyboard while open (Escape), as the bar's popovers; below
             // the banner, at the button's right edge, as macOS's.
@@ -237,17 +240,28 @@ impl Banners {
             let closed = window.clone();
             menu.connect_closed(move |_| closed.set_keyboard_mode(KeyboardMode::None));
         }
-        window.set_child(Some(&card));
+        // The × centred on the card's top-right corner, over the window's margin there.
+        let frame = gtk::Overlay::builder()
+            .child(&card)
+            .css_classes(["banner"])
+            .build();
+        let close = close(n, requests.clone());
+        close.set_halign(gtk::Align::End);
+        frame.add_overlay(&close);
+        card.set_margin_top(CLOSE_SIZE / 2);
+        card.set_margin_end(CLOSE_SIZE / 2);
+        window.set_child(Some(&frame));
+        input_region(&window, &card, &close);
         // The banner follows a swipe sideways, as far as its anchored edge lets it.
-        let (gap, swiped) = (self.gap, self.swipe);
+        let swiped = self.swipe;
         let moved = glib::clone!(
             #[weak]
             window,
             move |dx: f64| {
                 window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(0.8));
                 match horizontal {
-                    Some(Edge::Right) => window.set_margin(Edge::Right, gap - dx as i32),
-                    Some(edge) => window.set_margin(edge, gap + dx as i32),
+                    Some(Edge::Right) => window.set_margin(Edge::Right, margin - dx as i32),
+                    Some(edge) => window.set_margin(edge, margin + dx as i32),
                     None => {}
                 }
             }
@@ -267,9 +281,8 @@ impl Banners {
             card.add_controller(click);
         }
         if let Some(countdown) = countdown {
-            countdown.follow(&card, &window, menu.as_ref());
+            countdown.follow(&frame, &window, menu.as_ref());
         }
-        Blur::attach(&self.blur, &window, Corners::Panel);
         window.set_visible(true);
         window
     }
@@ -299,7 +312,7 @@ impl Countdown {
         *self.timer.borrow_mut() = Some(source);
     }
 
-    /// The clock stopped while the pointer is over `card`, or its `menu` is open. Destroyed
+    /// The clock stopped while the pointer is over `card` (or its ×), or its `menu` is open. Destroyed
     /// with `window` still pending (not by `Banners`, which takes it first: its output
     /// gone), the banner is expired at once.
     fn follow(&self, card: &gtk::Overlay, window: &gtk::Window, menu: Option<&gtk::Popover>) {
@@ -366,11 +379,9 @@ pub fn act(
 /// A notification's card, as macOS's: its app's icon (full colour, from its desktop file,
 /// else the icon it sent), or its image with the app's icon as a badge on it; the summary,
 /// with the time after it in the history (`times`, to refresh), the body (three lines at
-/// most); `side` (its actions) on the right; × over its top-left corner while the pointer
-/// is over it, named after the summary for screen readers.
+/// most); `side` (its actions) on the right. An overlay, for its × (`close`).
 pub fn content(
     n: &Notification,
-    requests: UnboundedSender<Request>,
     side: Option<&gtk::Widget>,
     times: Option<&Times>,
 ) -> gtk::Overlay {
@@ -446,10 +457,15 @@ pub fn content(
         side.set_valign(gtk::Align::Center);
         main.append(side);
     }
-    let card = gtk::Overlay::builder()
+    gtk::Overlay::builder()
         .child(&main)
         .css_classes(["card"])
-        .build();
+        .build()
+}
+
+/// A notification's ×, which dismisses it, shown while the pointer is over its card (at the
+/// top left, unless moved); named after the summary for screen readers.
+pub fn close(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Button {
     let close = gtk::Button::builder()
         .icon_name("window-close-symbolic")
         .css_classes(["close"])
@@ -462,8 +478,31 @@ pub fn content(
     close.connect_clicked(move |_| {
         let _ = requests.send(Request::Dismiss(id));
     });
-    card.add_overlay(&close);
-    card
+    close
+}
+
+/// A banner's window takes the pointer only on its `card` and its `close`, not on the
+/// margin around them (the shell's own windows have none of GTK's shapes to keep).
+fn input_region(window: &gtk::Window, card: &gtk::Overlay, close: &gtk::Button) {
+    let (card, close) = (card.clone(), close.clone());
+    window.connect_realize(move |window| {
+        let (window, card, close) = (window.clone(), card.clone(), close.clone());
+        let Some(surface) = window.surface() else {
+            return;
+        };
+        // After GTK's own handler: the widgets laid out for the size.
+        surface.connect_layout(move |surface, _, _| {
+            let rectangles: Vec<_> = [card.upcast_ref::<gtk::Widget>(), close.upcast_ref()]
+                .iter()
+                .filter_map(|w| w.compute_bounds(&window))
+                .map(|b| {
+                    let (x, y) = (b.x() as i32, b.y() as i32);
+                    cairo::RectangleInt::new(x, y, b.width() as i32, b.height() as i32)
+                })
+                .collect();
+            surface.set_input_region(Some(&cairo::Region::create_rectangles(&rectangles)));
+        });
+    });
 }
 
 /// The app's icon: its desktop file's (`desktop-entry`), else the one it sent (a name, a

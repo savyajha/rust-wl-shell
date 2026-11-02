@@ -25,7 +25,8 @@
 #   7. each way the dialog closes (Join, Cancel, Escape, an error then Cancel, NM's
 #      cancel) gives the keyboard back: typing reaches the window again
 #   8. the Wi-Fi switch turns the radio off and on
-#   9. the VPN item lists the WireGuard connection, and switches it on and off
+#   9. the VPN item lists the WireGuard connection, and switches it on and off; its icon
+#      has a green badge only while it is on
 #  10. Bluetooth: the paired devices (the battery's level after one), connect and
 #      disconnect, and the adapter's switch
 #  11. none of the passwords typed is in the system's or alice's journal
@@ -442,6 +443,12 @@ pkgs.testers.runNixOSTest {
         item(("Wi-Fi", "Network"))
         typing_reaches_the_window("after-switch")
 
+    def badge():
+        """The bar's pixels in the VPN badge's green (#2ec27e)."""
+        shot = screen()
+        green = lambda p: all(abs(c - b) <= 40 for c, b in zip(p, (0x2E, 0xC2, 0x7E)))
+        return [(x, y) for x in range(1024) for y in range(HEIGHT) if green(pixel(shot, x, y))]
+
     with subtest("the VPN item switches WireGuard on and off"):
         machine.succeed(
             "nmcli connection add type wireguard con-name 'Office VPN' ifname wg0"
@@ -449,17 +456,20 @@ pkgs.testers.runNixOSTest {
             + " ipv4.method manual ipv4.addresses 10.9.0.2/24 ipv6.method disabled"
         )
         wait_for_tree(has("button", "VPN: off"), "the VPN item")
+        assert not badge(), "a badge while off"
         item("VPN")
         wait_for_tree(has("check box", "Office VPN"), "the VPN popover")
         machine.send_monitor_command(f"screendump {machine.out_dir}/vpn.ppm gpu 0")
         act("Office VPN")
         machine.wait_until_succeeds("nmcli -t -f NAME connection show --active | grep -q 'Office VPN'", timeout=20)
         wait_for_tree(has("button", "VPN: on"), "the VPN on")
+        retry(lambda _: len(badge()) > 10, 10)
         item("VPN")
         wait_for_tree(has("check box", "Office VPN"), "the VPN popover")
         act("Office VPN")
         machine.wait_until_fails("nmcli -t -f NAME connection show --active | grep -q 'Office VPN'", timeout=20)
         wait_for_tree(has("button", "VPN: off"), "the VPN off")
+        retry(lambda _: not badge(), 10)
         typing_reaches_the_window("after-vpn")
 
     with subtest("Bluetooth: the paired devices, connected and disconnected, and the switch"):

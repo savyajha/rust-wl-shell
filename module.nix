@@ -55,8 +55,8 @@ in
         The config's keys and their values, as README.md lists them. Unknown keys and
         invalid values fail the build. `secret-agent = false` leaves NetworkManager's own
         requests for secrets to another agent (a panel that has one), while the network
-        items stay. `niri-blur-rule = true` leaves the blur of the banners
-        and the OSD to niri's `layer-rule`s, which round their corners smoothly (README.md).
+        items stay. `niri-blur-rule = true` leaves the blur of the OSD to
+        niri's `layer-rule`, which rounds its corners smoothly (README.md).
       '';
     };
     style = lib.mkOption {

@@ -81,9 +81,11 @@ fn stylesheet(config: &Config) -> String {
     let sizes = config.sizes();
     let (height, font, icon, spacing) = (sizes.height, sizes.font, sizes.icon, sizes.spacing);
     let (popover, panel) = (config.popover_radius, config.panel_radius);
+    let close = crate::notifications::CLOSE_SIZE;
     format!(
         "window {{ --height: {height}px; --font-size: {font}px; --icon-size: {icon}px; \
-         --spacing: {spacing}px; --popover-radius: {popover}px; --panel-radius: {panel}px; }}\n{}{}",
+         --spacing: {spacing}px; --popover-radius: {popover}px; --panel-radius: {panel}px; \
+         --close-size: {close}px; }}\n{}{}",
         include_str!("style.css"),
         include_str!("adwaita.css")
     )

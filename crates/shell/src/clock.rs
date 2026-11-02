@@ -10,7 +10,7 @@ use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::notifications::{Banners, Times, act, ago, content, swipe};
+use crate::notifications::{Banners, Times, act, ago, close, content, swipe};
 use crate::popover::{Item, Switch, title};
 
 pub struct ClockItem {
@@ -162,7 +162,8 @@ impl ClockItem {
     /// A notification's row: its card, swiped away as a banner, a click on it its default
     /// action (when it still has one: not after a restart).
     fn row(&self, n: &Notification) -> gtk::Overlay {
-        let card = content(n, self.requests.clone(), None, Some(&self.times));
+        let card = content(n, None, Some(&self.times));
+        card.add_overlay(&close(n, self.requests.clone()));
         card.add_css_class("row");
         let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);

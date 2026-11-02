@@ -204,11 +204,11 @@ fn signal_icon(strength: u8) -> &'static str {
     }
 }
 
-/// The VPN connections: hidden when there are none; the icon struck through while none is
-/// on. A click on one switches it on or off.
+/// The VPN connections: hidden when there are none; a green tick on the icon's corner while
+/// one is on. A click on one switches it on or off.
 pub struct VpnItem {
     pub item: Item,
-    icon: gtk::Image,
+    badge: gtk::Image,
     rows: gtk::Box,
     shown: RefCell<Vec<Vpn>>,
     requests: UnboundedSender<Request>,
@@ -216,15 +216,25 @@ pub struct VpnItem {
 
 impl VpnItem {
     pub fn new(requests: UnboundedSender<Request>) -> Self {
-        let icon = gtk::Image::from_icon_name("network-vpn-symbolic");
-        let item = Item::new(&icon, "VPN");
+        let face = gtk::Overlay::builder()
+            .child(&gtk::Image::from_icon_name("network-vpn-symbolic"))
+            .build();
+        let badge = gtk::Image::builder()
+            .icon_name("object-select-symbolic")
+            .css_classes(["vpn-badge"])
+            .halign(gtk::Align::End)
+            .valign(gtk::Align::End)
+            .visible(false)
+            .build();
+        face.add_overlay(&badge);
+        let item = Item::new(&face, "VPN");
         let title = title("VPN");
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
         item.content.append(&title);
         item.content.append(&rows);
         Self {
             item,
-            icon,
+            badge,
             rows,
             shown: RefCell::default(),
             requests,
@@ -239,10 +249,7 @@ impl VpnItem {
         }
         self.shown.replace(vpns.clone());
         let on = vpns.iter().filter(|v| v.state != VpnState::Off).count();
-        self.icon.set_icon_name(Some(match on {
-            0 => "network-vpn-disabled-symbolic",
-            _ => "network-vpn-symbolic",
-        }));
+        self.badge.set_visible(on > 0);
         let label = if on > 0 { "VPN: on" } else { "VPN: off" };
         self.item.set_name(label);
         let rows: Vec<Row> = vpns

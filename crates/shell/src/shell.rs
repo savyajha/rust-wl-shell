@@ -47,18 +47,18 @@ pub fn start(
         mut updates,
         senders,
     } = core;
-    let blur = Blur::new(display, config.panel_radius as i32).map(Rc::new);
-    // The banners and the OSD: blurred by the shell (its region's corners in
-    // whole pixels), or by niri's layer rule, which rounds them smoothly (README).
-    let layer_blur = blur.clone().filter(|_| !config.niri_blur_rule);
+    let blur = Blur::new(display).map(Rc::new);
+    // The OSD: blurred by the shell (its region's corners in whole pixels), or by niri's
+    // layer rule, which rounds them smoothly (README). The banners are opaque.
+    let osd_blur = blur.clone().filter(|_| !config.niri_blur_rule);
     let s = &senders;
     let dialog = Dialog::new(s.network.clone(), s.answers.clone(), s.power.clone());
-    let banners = Banners::new(&config, s.notifications.clone(), layer_blur.clone());
+    let banners = Banners::new(&config, s.notifications.clone());
     let shell = Rc::new(RefCell::new(Shell {
         dialog,
         banners: Rc::new(RefCell::new(banners)),
         senders,
-        osd: config.osd.then(|| Osd::new(&config, &layer_blur)),
+        osd: config.osd.then(|| Osd::new(&config, &osd_blur)),
         config: Rc::new(config),
         blur,
         bars: Vec::new(),

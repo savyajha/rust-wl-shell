@@ -280,8 +280,9 @@ In the UI (`notifications.rs`, `clock.rs`):
 
 - each banner is a window of its own on the overlay layer of the focused output (niri's),
   anchored at the configured corner, `notification-gap` (8 px) from the edges (and below
-  a bar, by its exclusive zone), `notification-width` (360 px) wide, frosted and rounded at `panel-radius` (14 px); they stack
-  from the corner, newest first. A banner (`notifications::content`) is macOS's: on the
+  a bar, by its exclusive zone), `notification-width` (360 px) wide, opaque in the theme's popover colours
+  (`@popover_bg_color`, `@popover_fg_color`, as the popovers) and rounded at `panel-radius`
+  (14 px), with no blur; they stack from the corner, newest first, their cards a gap apart. A banner (`notifications::content`) is macOS's: on the
   left the app's icon, full colour, 40 px (its desktop file's, from the `desktop-entry`
   hint through `DesktopAppInfo`, else the icon it sent, as a name, a path or a `file://`
   URI, else `application-x-executable`), or its image (`image-data`, as a texture) with
@@ -290,11 +291,15 @@ In the UI (`notifications.rs`, `clock.rs`):
   it is, if it does not parse), three lines at most; no app name. One action other than
   `default` is a button on the right; more are "Options", a menu button whose popover
   (the bar's popovers' look) lists them, below the banner at the button's right edge, taking the keyboard while open
-  (`OnDemand`, as the bar's popovers; Escape closes it). × is round, over the card's top-left corner,
-  shown while the pointer is over the card (CSS `:hover`; always in the tree, for
-  screen readers, named `Dismiss "summary"`); inside the banner's padding rather than past its edge, as a layer
-  surface has no room outside it that its blur would not cover. The history's rows use
-  the same card, without actions, with the time after the summary, muted ("now", "5m",
+  (`OnDemand`, as the bar's popovers; Escape closes it). × is round (`CLOSE_SIZE`, 20 px,
+  the stylesheet's `--close-size` set from it), centred on the card's top-right corner,
+  overhanging it: the window has a clear margin of half its size above the card and to its
+  right (less from the edge's gap, never past the output's edge, so with the default gap
+  the card is 10 px from the edge rather than 8), and takes input only on the card and
+  the × (its input region, set on each layout). It shows while the pointer is over the
+  banner (CSS `:hover`; always in the tree, for screen readers, named
+  `Dismiss "summary"`). The history's rows use the same card, without actions, its × over
+  its top-left corner, with the time after the summary, muted ("now", "5m",
   "2h"; refreshed each time the popover shows). Its countdown (`Countdown`) pauses while the pointer
   is over it, or its menu is open (resumed when it closes only if the pointer has left); destroyed with its window still pending (its output gone), the banner
   expires: a replaced notification's banner is built again, with its whole time. While
@@ -483,7 +488,13 @@ one:
   signal and, after the name, a lock for a secured network. A click on a known network
   activates it (on the current one, nothing); on another, an open one joins and a
   secured one opens the dialog.
-- VPN: `network-vpn-symbolic`, or `network-vpn-disabled-symbolic` while none is on, hidden with no VPN connection;
+- VPN: `network-vpn-symbolic`, hidden with no VPN connection; while one is on, a badge on
+  its bottom-right corner (a `gtk::Overlay`): a green circle (`--badge-ok`, GNOME's
+  `#2ec27e`, fixed, as the theme's success colour may not be green) with a white
+  `object-select-symbolic` tick, three eighths of the icon's size plus a ring in the bar's
+  tint (`--tint`) as if cut out of the icon (a translucent ring: over the icon's strokes it
+  shows grey rather than the backdrop; a true cut-out would need a mask in a widget of our
+  own);
   a row per connection, a click switching it on or off ("Connecting…" after it while
   it connects).
 - Bluetooth: `bluetooth-active-symbolic` connected, `bluetooth-symbolic` on with nothing
@@ -551,8 +562,8 @@ round icons as circular buttons, switches and sliders libadwaita's. A box's
 spacing is CSS too: its `border-spacing`, which GTK's box layout adds to its (zero)
 `spacing`. Before it, `style.rs` puts one generated `window { }` rule with what the
 config sets: `--height`, `--font-size`, `--icon-size`, `--spacing`, `--popover-radius`
-and `--panel-radius`. The banners' radius is a config key because the blur's region
-follows it (`Corners` in `blur.rs`), and the popovers', which once had blur, stays one; the bar's height feeds its exclusive zone; layer-shell margins,
+and `--panel-radius`, then `--close-size` (the banners' layout follows it). The banners'
+and the popovers' radii, which once had blur following them, stay config keys; the bar's height feeds its exclusive zone; layer-shell margins,
 the pills' animated sizes and the timings are the config's for the same reason, CSS not
 reaching them. The font family is the system's (`gtk-font-name`).
 
@@ -575,18 +586,17 @@ is logged only.
 
 `blur.rs` makes our own event queue on GDK's Wayland connection (from gdk4-wayland),
 binds `ext_background_effect_manager_v1`, and reads its capabilities with one round
-trip: without blur among them, there is none. Each bar's window, each banner and the
+trip: without blur among them, there is none. Each bar's window and the
 OSD asks for blur behind its `wl_surface` when it is mapped (logging `blur on` at info
 for bars, at debug for the others, which map on every showing); the request takes effect
-with GTK's next commit. A bar's region is all of it; the OSD's and the banners' are
-their surface with its corners rounded (half the height for the OSD's pill,
-`panel-radius` for the banners), two rows of pixels at a time, so that the blur does not
-show past the corners. The dialog and the popovers are opaque, with no blur. With
-`niri-blur-rule`, the banners and the OSD are given no blur
+with GTK's next commit. A bar's region is all of it; the OSD's is
+its surface with its corners rounded (half its height, a pill), two rows of pixels at a time, so that the blur does not
+show past the corners. The dialog, the popovers and the banners are opaque, with no
+blur. With `niri-blur-rule`, the OSD is given no blur
 object: niri 26.04 clips a region a layer surface sets to its rectangles, not to the
 rule's `geometry-corner-radius` (`render_for_tile` with `clip_to_geometry` false), so
 whole-pixel rows step at a fractional scale; with no region, the rule's blur is rounded
-by niri, anti-aliased (the README's rules). The region is set again on each layout of the surface (its size). The effect object is destroyed when it is
+by niri, anti-aliased (the README's rule). The region is set again on each layout of the surface (its size). The effect object is destroyed when it is
 unmapped. The queue is drained on each request; a later change of capabilities is not followed. GTK 4.23.3 and later bind
 the protocol themselves (a second object is a protocol error), so there the shell logs
 that blur is not supported yet; that path (blur nodes in the snapshot) is to be built
@@ -768,7 +778,7 @@ is typed with the VM's keyboard, into whatever has the focus. It checks:
    window (foot) again
 9. the Wi-Fi switch turns the radio off (`nmcli radio wifi`) and on
 10. a WireGuard connection added with nmcli shows the VPN item; its row switches it on
-    and off (`nmcli`), and the item says so
+    and off (`nmcli`), and the item says so, its green badge shown only while on (pixels)
 11. Bluetooth: the paired devices only, in order, the headphones' 80 %; a click connects
     and disconnects one (the fake's state, the item's name), and the switch turns the
     adapter off
@@ -790,7 +800,8 @@ scrolls sideways with ydotool's uinput mouse (QEMU's tablet sends no horizontal 
 1. the shell owns the name: its server information and capabilities (no
    `body-hyperlinks`); a malformed `image-data` (gdbus, 3 bytes for a 100x100 image)
    leaves the banner without it, GTK never handed it, the shell still running
-2. a banner at the top right, below the bar (pixels), with the app's name, the summary
+2. a banner at the top right, below the bar, opaque in libadwaita's dark popover colour
+   (pixels), with the app's name, the summary
    and the body's markup; four sent, three shown, the newest (with buttons) on top (the
    first gap between banners comes late)
 3. the timeouts, each timed alike from before it is sent: "never" capped (2 s) well

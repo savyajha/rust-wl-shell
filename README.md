@@ -63,7 +63,7 @@ backlight "amdgpu_bl1"
 | `workspace-animation` | `200` | A workspace switch's animation, in ms. |
 | `popover-radius` | `15` | The popovers' corners' radius (libadwaita's). |
 | `popover-gap` | `6` | The space between the bar and its popovers. |
-| `panel-radius` | `14` | The banners' corners' radius (and their blur's). |
+| `panel-radius` | `14` | The banners' corners' radius. |
 | `history-height` | `480` | The notifications' history's height before it scrolls. |
 | `osd-margin` | `48` | The OSD's distance from the output's bottom edge. |
 | `osd-timeout` | `1500` | How long the OSD shows after the last change, in ms. |
@@ -90,7 +90,7 @@ backlight "amdgpu_bl1"
 | `keep-awake` | `true` | Show the keep awake toggle: while on, a logind idle inhibitor. |
 | `power` | `true` | Show the power menu after the clock. |
 | `power-countdown` | `60` | The seconds a restart, a shut down or a log out waits in its dialog before it happens. |
-| `niri-blur-rule` | `false` | Leave the blur behind the banners and the OSD to a niri `layer-rule` (below), whose corners are smooth; without the rule they have none. |
+| `niri-blur-rule` | `false` | Leave the blur behind the OSD to a niri `layer-rule` (below), whose corners are smooth; without the rule it has none. |
 | `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock has no popover. |
 | `notification-position` | `"top-right"` | Where banners show on the focused output: `"top-left"`, `"top"`, `"top-right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`. |
 | `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
@@ -121,7 +121,8 @@ speaker mutes) and the outputs (each sound card's available ports) to choose fro
 brightness's slider; the layouts to choose from. A click outside or Escape closes it.
 The brightness is set through logind, which needs no permission. The night light and
 keep awake are click toggles with no popover, their icons telling their state (the moon,
-struck through when off; a cup, steaming when on), as VPN's does. While Do Not Disturb
+struck through when off; a cup, steaming when on). While a VPN is on, its icon has a
+green tick on its corner (`--badge-ok`). While Do Not Disturb
 is on, its icon shows beside the clock. The night
 light starts and stops a user unit (wlsunset by default), whose state it shows, so
 `systemctl --user stop wlsunset` turns it off too; off stays off until it is turned on
@@ -149,8 +150,10 @@ which iwd reads only if it holds plain certificates: on NixOS, set
 Notifications show as banners on the focused output (top right by default), at most
 three, newest nearest the corner, each for its app's timeout or 5 s (paused while the
 pointer is over it); one that asks never to expire still leaves after
-`notification-max-timeout`, unless it is critical. A click runs its default action, its
-buttons their actions, × or a swipe sideways (a drag, or two fingers on a touchpad)
+`notification-max-timeout`, unless it is critical. Banners are opaque, in the theme's
+popover colours (`--banner-bg`, `--banner-fg`), with no blur. A click runs its default
+action, its buttons their actions, × (on its top-right corner while hovered) or a swipe
+sideways (a drag, or two fingers on a touchpad)
 dismisses it. The clock opens the history, grouped by app, with × and "Clear all", and a
 Do Not Disturb switch (no banners but critical ones); both are kept in
 `$XDG_STATE_HOME/rust-wl-shell/notifications.json` across restarts.
@@ -176,7 +179,7 @@ again whenever it changes (replaced as a symlink too). Overriding a variable is 
 window {
   --accent: #e01b24;
   --tint: rgba(0, 0, 0, 0.5);
-  --radius-s: 4px;
+  --radius-m: 6px;
 }
 ```
 
@@ -184,9 +187,9 @@ A file GTK cannot parse in full is left out, its errors logged, and the built-in
 stays; one with only warnings (an empty declaration, `;;`) is applied, its warnings
 logged. The accent defaults to GTK's (`@accent_bg_color`, which a gtk.css can set).
 
-Do not override `--panel-radius` or `--radius-pill` in the stylesheet: the shell's blur
-follows the config's radius, not the CSS, so its corners would no longer match. Set the
-banners' radius with the config's `panel-radius`, and leave `--radius-pill` round.
+Do not override `--radius-pill` or `--close-size` in the stylesheet: the OSD's blur is a
+pill whatever the CSS says, and the banners' room for their × follows the shell's own
+size. Set the banners' radius with the config's `panel-radius`.
 
 The shell watches the name `style.css` in its directory: it sees the file written,
 replaced, or renamed over (home-manager's symlink), but not an edit to the file a
@@ -195,24 +198,17 @@ symlink there points to elsewhere.
 The shell's blur is clipped in whole logical pixels, so at a fractional scale its rounded
 corners show steps past the drawn ones. niri can round the blur itself, but only when
 the surface asks for none (it does not round a region a surface sets). With
-`niri-blur-rule true`, the banners and the OSD ask for none, and these rules in niri's
-config blur them with smooth corners (the bar keeps the shell's blur; the popovers and
-the dialog are opaque, with no blur):
+`niri-blur-rule true`, the OSD asks for none, and this rule in niri's config blurs it
+with smooth corners (the bar keeps the shell's blur; the popovers, the banners and the
+dialog are opaque, with no blur):
 
 ```kdl
-layer-rule {
-    match namespace="^rust-wl-shell-notification$"
-    geometry-corner-radius 14
-    background-effect { blur true; }
-}
 layer-rule {
     match namespace="^rust-wl-shell-osd$"
     geometry-corner-radius 999
     background-effect { blur true; }
 }
 ```
-
-The banners' radius is the config's default `panel-radius` (14).
 
 ## home-manager
 

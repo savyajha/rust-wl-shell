@@ -170,6 +170,23 @@ pkgs.testers.runNixOSTest {
         out = as_user("pactl get-sink-volume @DEFAULT_SINK@")
         return int(re.findall(r"(\d+)%", out)[0])
 
+    def muted():
+        return "yes" in as_user("pactl get-sink-mute @DEFAULT_SINK@")
+
+    def from_outside(change, landed):
+        """`change` made with wpctl, as the keys would, and sent again if the server lost
+        it: now and then wpctl's change is never applied (pactl and wpctl both read the
+        old volume back, and no event reaches the shell, seen in 2 runs of about 100)."""
+        command = f"wpctl {change}"
+        as_user(command)
+        end = time.time() + 3
+        while not landed():
+            if time.time() > end:
+                print(f"the server lost `{command}`: sent again")
+                as_user(command)
+                return
+            time.sleep(0.05)
+
     def glimpse(check, what):
         """`check` true of the tree at some point in 10 s, the tree read again and again
         (not once a second): for the OSD, shown for 1.5 s."""
@@ -297,7 +314,7 @@ pkgs.testers.runNixOSTest {
         assert not [n for _, n in t if n.startswith("Brightness")], "a backlight in the VM?"
         assert not osd_shown(t), "an OSD at start-up"
         # From outside the shell: the item follows, and the OSD shows, then hides.
-        as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.30")
+        from_outside("set-volume @DEFAULT_AUDIO_SINK@ 0.30", lambda: volume() == 30)
         # The OSD first: it shows for 1.5 s only, the item stays.
         glimpse(has("label", "30"), "the OSD with 30")
         wait_for_tree(has("button", "Volume 30%"), "the volume item at 30 %")
@@ -358,7 +375,7 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(lacks("slider", "Volume"), "the popover closed")
         retry(lambda _: keyboard_free(), 10)
         # Mute from outside: the item says so, and the OSD shows.
-        as_user("wpctl set-mute @DEFAULT_AUDIO_SINK@ 1")
+        from_outside("set-mute @DEFAULT_AUDIO_SINK@ 1", muted)
         # The OSD first: it shows for 1.5 s only, the item stays.
         glimpse(osd_shown, "the OSD for mute")
         wait_for_tree(has("button", "Volume muted"), "the volume item muted")
@@ -465,7 +482,7 @@ pkgs.testers.runNixOSTest {
             height = len(shot[1]) // 3 // width
             return not is_grey(pixel(shot, width // 2, height - 48 - 22))
         niri("action focus-monitor-right")
-        as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.55")
+        from_outside("set-volume @DEFAULT_AUDIO_SINK@ 0.55", lambda: volume() == 55)
         glimpse(has("label", "55"), "the OSD with 55")
         assert osd_on(1) and not osd_on(0), "the OSD not on the focused output"
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden")
@@ -473,7 +490,7 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(f"{LOG} | grep -q 'output Virtual-2 removed'")
         wait_for_tree(lambda t: bars(t) == 1, "one bar")
         # Its output gone, the OSD shows on the one left.
-        as_user("wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.65")
+        from_outside("set-volume @DEFAULT_AUDIO_SINK@ 0.65", lambda: volume() == 65)
         glimpse(has("label", "65"), "the OSD with 65")
         retry(lambda _: osd_on(0), 5)
         machine.send_monitor_command(f"screendump {machine.out_dir}/osd-moved.ppm gpu 0")
