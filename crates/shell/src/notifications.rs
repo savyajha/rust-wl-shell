@@ -241,7 +241,7 @@ impl Banners {
                 (Some(side.upcast::<gtk::Widget>()), options)
             }
         };
-        let card = content(n, side.as_ref(), false);
+        let card = content(n, requests.clone(), side.as_ref(), false);
         let menu = options.as_ref().map(|(_, menu)| menu.clone());
         if let Some((button, menu)) = &options {
             // The menu takes the keyboard while open (Escape), as the bar's popovers; below
@@ -267,7 +267,6 @@ impl Banners {
                 move |_| window.set_keyboard_mode(KeyboardMode::None)
             ));
         }
-        card.add_overlay(&close(n, requests.clone()));
         window.set_child(Some(&card));
         // GTK closes an open popover on a click outside it, and keeps the click: closed
         // first, by the pointer coming onto the banner, the click (on ×) reaches it. While
@@ -421,10 +420,15 @@ fn chromium_settings(n: &Notification, key: &str) -> bool {
 
 /// A notification's card, as macOS's: its app's icon (full colour, from its desktop file,
 /// else the icon it sent), or its image with the app's icon as a badge on it; the summary,
-/// with the time after it (`time`: in the Notification Centre), the body (three lines at
-/// most); `side` (its actions) on the right, the room for its × (`close`) kept after them.
-/// An overlay, for its ×.
-pub fn content(n: &Notification, side: Option<&gtk::Widget>, time: bool) -> gtk::Overlay {
+/// with the time after it (`time`: in the Notification Centre) and its × (sending
+/// `requests` its dismissal) in the time's place while hovered, the body (three lines at
+/// most); `side` (its actions) on the right.
+pub fn content(
+    n: &Notification,
+    requests: UnboundedSender<Request>,
+    side: Option<&gtk::Widget>,
+    time: bool,
+) -> gtk::Overlay {
     let main = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     main.add_css_class("main");
     let slot = gtk::Overlay::new();
@@ -470,11 +474,22 @@ pub fn content(n: &Notification, side: Option<&gtk::Widget>, time: bool) -> gtk:
         .build();
     summary.add_css_class("summary");
     top.append(&summary);
-    if time {
-        let time = gtk::Label::new(Some(&ago(n.time)));
-        time.add_css_class("time");
-        top.append(&time);
-    }
+    // At the summary line's end: its time (in the Centre), and over it, in its place while
+    // the card is hovered (or the × has the keyboard), the ×; as big as the larger.
+    let slot = gtk::Overlay::builder()
+        .css_classes(["slot"])
+        .valign(gtk::Align::Start)
+        .build();
+    let stamp = match time {
+        true => gtk::Label::new(Some(&ago(n.time))).upcast::<gtk::Widget>(),
+        false => gtk::Box::new(gtk::Orientation::Horizontal, 0).upcast(),
+    };
+    stamp.add_css_class("time");
+    slot.set_child(Some(&stamp));
+    let close = close(n, requests);
+    slot.add_overlay(&close);
+    slot.set_measure_overlay(&close, true);
+    top.append(&slot);
     text.append(&top);
     if !n.body.is_empty() {
         let body = gtk::Label::builder()
@@ -502,15 +517,14 @@ pub fn content(n: &Notification, side: Option<&gtk::Widget>, time: bool) -> gtk:
         .build()
 }
 
-/// A notification's ×, which dismisses it: in its card's top-right corner, within its
-/// padding, shown while the pointer is over the card; named after the summary (else its app)
-/// for screen readers.
-pub fn close(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Button {
+/// A notification's ×, which dismisses it; named after the summary (else its app) for screen
+/// readers.
+fn close(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Button {
     let close = gtk::Button::builder()
         .icon_name("window-close-symbolic")
         .css_classes(["close"])
-        .halign(gtk::Align::End)
-        .valign(gtk::Align::Start)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
         .build();
     let id = n.id;
     let name = [&n.summary, &n.app]

@@ -15,7 +15,7 @@ use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::notifications::{Banners, act, close, content, swipe};
+use crate::notifications::{Banners, act, content, swipe};
 use crate::popover::{self, Switch, title};
 
 /// Its slide in and out: its whole surface moved, by its right margin.
@@ -233,8 +233,7 @@ impl Centre {
     /// (when it still has one: not after a restart), which closes the centre.
     fn card(self: &Rc<Self>, n: &Notification) -> gtk::Overlay {
         // Its time ("5m") as of when the list was built (on opening and on each change).
-        let card = content(n, None, true);
-        card.add_overlay(&close(n, self.requests.clone()));
+        let card = content(n, self.requests.clone(), None, true);
         let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);
         swipe(&card, self.swipe, true, moved, move || {

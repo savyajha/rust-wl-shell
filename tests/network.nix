@@ -378,7 +378,7 @@ pkgs.testers.runNixOSTest {
         time.sleep(1.5)
         assert has("switch", "Wi-Fi")(tree()), "closed by a banner under a still pointer"
         # The pointer off the banner (still over the popover) and back onto it: the popover
-        # closes; then a click on its x, in the card's top-right corner.
+        # closes; then a click on its x, at its summary line's end (the card's top-right).
         move(1024 - 10 - 90, HEIGHT + 200)
         time.sleep(0.5)
         move(1024 - 10 - 90, HEIGHT + 44)

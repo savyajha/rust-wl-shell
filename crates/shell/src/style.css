@@ -70,14 +70,11 @@ window {
   --popover-fg: @popover_fg_color;
 
   /* A notification's ×: a square in the theme's red (its destructive colours), rounded as
-     niri's windows are (0: sharp), in its card's top-right corner, within the card's
-     padding and `--close-inset` more; the text keeps `--close-gap` from it. Hovered, its
-     red moves towards its glyph's colour. */
+     niri's windows are (0: sharp), at the summary line's end, in its time's place while
+     the card is hovered. Hovered itself, its red moves towards its glyph's colour. */
   --close-size: 20px;
   --close-icon-size: 12px;
   --close-radius: 6px;
-  --close-inset: 0px;
-  --close-gap: var(--space-s);
   --close-bg: @destructive_bg_color;
   --close-fg: @destructive_fg_color;
   --close-bg-hover: mix(var(--close-bg), var(--close-fg), 0.15);
@@ -314,7 +311,7 @@ popover.item-popover expander {
 
 /* A notification's banner, as macOS's: an opaque card (its window no more than it), its
    app's icon (or its image, the icon a badge on it) on the left, the summary in bold, the
-   body, its action (or "Options") on the right; × in its top-right corner while hovered.
+   body, its action (or "Options") on the right; × at the end of its summary line while hovered.
    In the clock's popover, its rows, with the time after the summary. */
 window.notification {
   background: none;
@@ -330,7 +327,6 @@ window.notification > .card {
 
 .card .main {
   border-spacing: var(--space-l);
-  margin-right: calc(var(--close-size) + var(--close-inset) + var(--close-gap));
 }
 
 .card .text {
@@ -350,17 +346,22 @@ window.notification > .card {
   font-weight: 700;
 }
 
-.card .time {
-  opacity: var(--dim);
-  font-size: 0.85em;
+.card .slot {
   margin-left: var(--space-s);
 }
 
-.card > button.close {
+.card .time {
+  opacity: var(--dim);
+  font-size: 0.85em;
+  transition: opacity var(--transition);
+}
+
+/* The × over the time, shown in its place while the card is hovered or the × has the
+   keyboard. */
+.card .slot > button.close {
   all: unset;
   min-width: var(--close-size);
   min-height: var(--close-size);
-  margin: var(--close-inset);
   border-radius: var(--close-radius);
   background-color: var(--close-bg);
   color: var(--close-fg);
@@ -370,11 +371,17 @@ window.notification > .card {
   transition: opacity var(--transition), background-color var(--transition);
 }
 
-.card:hover > button.close {
+.card:hover .slot > button.close,
+.card .slot:focus-within > button.close {
   opacity: 1;
 }
 
-.card > button.close:hover {
+.card:hover .slot > .time,
+.card .slot:focus-within > .time {
+  opacity: 0;
+}
+
+.card .slot > button.close:hover {
   background-color: var(--close-bg-hover);
 }
 

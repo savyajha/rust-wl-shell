@@ -300,16 +300,17 @@ In the UI (`notifications.rs`, `clock.rs`):
   button whose popover (the bar's popovers' look) lists the others, below the banner at the button's right edge, taking the keyboard while open
   (`OnDemand`, as the bar's popovers; Escape closes it). × is a square in the theme's
   red (`@destructive_bg_color`, its glyph `@destructive_fg_color`; libadwaita's in
-  `fallback.css`), rounded at 6 px as niri's windows, in the card's top-right corner,
-  inside it (an overlay of the card, so within its padding), the card's text and buttons
-  keeping its width and a gap clear of it; hovered, its red mixed 15 % towards the
-  glyph's colour. Its size, radius, inset, colours and hover are the stylesheet's
-  (`--close-size`, `--close-icon-size`, `--close-radius`, `--close-inset`, `--close-gap`,
-  `--close-bg`, `--close-fg`, `--close-bg-hover`, `--close-outline`). The window is the
-  card alone. × shows while the pointer is over the card (CSS `:hover`; always in the
-  tree, for screen readers, named `Dismiss "summary"`, else after the app, else
-  `Dismiss`). The history's rows use the same card, without actions, its × in the same
-  corner, with the time after the summary, muted ("now", "5m",
+  `fallback.css`), rounded at 6 px as niri's windows, at the summary line's end (left of
+  any buttons), in the place of the time: a slot (an overlay measuring both) holds the
+  time (in the Centre; nothing on a banner) and over it the ×, as big as the larger, so
+  nothing moves when the × shows; the × shows, the time hidden, while the card is
+  hovered or the × has the keyboard (CSS `:hover`, `:focus-visible`, `:focus-within`).
+  Hovered itself, its red is mixed 15 % towards the glyph's colour. Its size, radius,
+  colours and hover are the stylesheet's (`--close-size`, `--close-icon-size`,
+  `--close-radius`, `--close-bg`, `--close-fg`, `--close-bg-hover`, `--close-outline`).
+  The window is the card alone. The × is always in the tree, for screen readers, named
+  `Dismiss "summary"`, else after the app, else `Dismiss`. The history's rows use the
+  same card, without actions, muted ("now", "5m",
   "2h"; as of its opening or last change). Its countdown (`Countdown`) pauses while the pointer
   is over it, or its menu is open (resumed when it closes only if the pointer has left).
   A replaced notification's banner is built again, with its whole time, the old one's

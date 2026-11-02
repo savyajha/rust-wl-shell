@@ -27,7 +27,7 @@
 #      labels ellipsized; the history's cards show no actions; all close the
 #      notification; the Options menu takes the keyboard: Escape closes it, and typing
 #      reaches the window again
-#   9. x shows in a banner's top-right corner, inside it (inset by its padding), while
+#   9. x shows at the end of a banner's summary line (its top-right, inset by its padding), while
 #      hovered, and dismisses it (closed, 2), as does its x named after the summary (or
 #      the app, with none), through AT-SPI
 #  10. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2)
@@ -348,7 +348,7 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(banner_gone("Menu"), "closed once acted on")
         retry(lambda _: keyboard_free(), 10)
 
-    with subtest("x shows in a banner's top-right corner while hovered, and dismisses it"):
+    with subtest("x shows at the summary line's end while hovered, and dismisses it"):
         nid = as_user(NOTIFY + "-p -t 20000 Hovered body").strip()
         wait_for_tree(banner_shown("Hovered"), "the banner")
         # The card's top-right corner (it ends 8 px from the edge, below the bar).

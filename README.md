@@ -152,7 +152,7 @@ three, newest nearest the corner, each for its app's timeout or 5 s (paused whil
 pointer is over it); one that asks never to expire still leaves after
 `notification-max-timeout`, unless it is critical. Banners are opaque, in the theme's
 popover colours (`--banner-bg`, `--banner-fg`), with no blur. A click runs its default
-action, its buttons their actions, × (in its top-right corner while hovered) or a swipe
+action, its buttons their actions, × (at the end of its summary line while hovered) or a swipe
 sideways (a drag, or two fingers on a touchpad)
 dismisses it. The clock opens the Notification Centre, a panel down the output's right
 (namespace `rust-wl-shell-centre`): a Do Not Disturb switch (no banners but critical
