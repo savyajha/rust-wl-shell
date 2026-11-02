@@ -6,6 +6,7 @@
 mod bar;
 mod bluetooth;
 mod blur;
+mod centre;
 mod clock;
 mod dialog;
 mod items;

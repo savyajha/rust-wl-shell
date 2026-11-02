@@ -7,7 +7,8 @@
    _scale.scss, _labels.scss and _drawing.scss's focus ring), Copyright the libadwaita
    authors, under the GNU Lesser General Public License 2.1 or later
    (LICENSES/LGPL-2.1-or-later.txt). Modified: only the rules for the widgets the dialog
-   and the popovers have, scoped under `window.dialog` and `popover.item-popover`, their
+   and the popovers have, scoped under `window.dialog` and `popover.item-popover` (the switches also under
+   `window.centre`, the Notification Centre), their
    variables mapped to the GTK theme's named colours (the --dialog-* and --popover-*
    variables of style.css), the popovers' shadow left out, and GTK's own theme's borders,
    shadows and gradients cleared, as libadwaita replaces that theme.
@@ -235,7 +236,8 @@ popover.item-popover .circle.chosen {
 }
 
 /* Switches. */
-popover.item-popover switch {
+popover.item-popover switch,
+window.centre switch {
   color: inherit;
   border: none;
   border-radius: 14px;
@@ -252,21 +254,25 @@ popover.item-popover switch {
               outline-offset 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-popover.item-popover switch:hover {
+popover.item-popover switch:hover,
+window.centre switch:hover {
   background-color: color-mix(in srgb, currentColor 20%, transparent);
 }
 
-popover.item-popover switch:active {
+popover.item-popover switch:active,
+window.centre switch:active {
   background-color: color-mix(in srgb, currentColor 25%, transparent);
 }
 
-popover.item-popover switch:focus:focus-visible {
+popover.item-popover switch:focus:focus-visible,
+window.centre switch:focus:focus-visible {
   outline-color: color-mix(in srgb, @accent_color 50%, transparent);
   outline-width: 2px;
   outline-offset: 1px;
 }
 
-popover.item-popover switch > slider {
+popover.item-popover switch > slider,
+window.centre switch > slider {
   min-width: 20px;
   min-height: 20px;
   margin: 0;
@@ -279,20 +285,26 @@ popover.item-popover switch > slider {
 
 popover.item-popover switch:hover > slider,
 popover.item-popover switch:active > slider,
-popover.item-popover switch:checked > slider {
+popover.item-popover switch:checked > slider,
+window.centre switch:hover > slider,
+window.centre switch:active > slider,
+window.centre switch:checked > slider {
   background-color: white;
 }
 
-popover.item-popover switch:checked {
+popover.item-popover switch:checked,
+window.centre switch:checked {
   color: var(--accent-fg);
   background-color: var(--accent);
 }
 
-popover.item-popover switch:checked:hover {
+popover.item-popover switch:checked:hover,
+window.centre switch:checked:hover {
   background-image: image(color-mix(in srgb, currentColor 10%, transparent));
 }
 
-popover.item-popover switch:checked:active {
+popover.item-popover switch:checked:active,
+window.centre switch:checked:active {
   background-image: image(rgba(0, 0, 6, 0.2));
 }
 

@@ -64,7 +64,7 @@ backlight "amdgpu_bl1"
 | `popover-radius` | `15` | The popovers' corners' radius (libadwaita's). |
 | `popover-gap` | `6` | The space between the bar and its popovers. |
 | `panel-radius` | `14` | The banners' corners' radius. |
-| `history-height` | `480` | The notifications' history's height before it scrolls. |
+| `notification-centre-width` | `380` | The Notification Centre's width (the clock opens it, down the output's right). |
 | `osd-margin` | `48` | The OSD's distance from the output's bottom edge. |
 | `osd-timeout` | `1500` | How long the OSD shows after the last change, in ms. |
 | `notification-gap` | `8` | The banners' distance from the output's edges and from each other. |
@@ -91,7 +91,7 @@ backlight "amdgpu_bl1"
 | `power` | `true` | Show the power menu after the clock. |
 | `power-countdown` | `60` | The seconds a restart, a shut down or a log out waits in its dialog before it happens. |
 | `niri-blur-rule` | `false` | Leave the blur behind the OSD to a niri `layer-rule` (below), whose corners are smooth; without the rule it has none. |
-| `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock has no popover. |
+| `notifications` | `true` | Be the notification server (`org.freedesktop.Notifications`); off, another one (a panel's) keeps the name, and the clock opens nothing. |
 | `notification-position` | `"top-right"` | Where banners show on the focused output: `"top-left"`, `"top"`, `"top-right"`, `"bottom-left"`, `"bottom"` or `"bottom-right"`. |
 | `notification-max-timeout` | `10` | The longest, in seconds, a banner asked never to expire stays; only critical ones stay until dismissed. |
 | `backlight` | the first | The backlight device to follow, by its name in `/sys/class/backlight`. |
@@ -154,8 +154,10 @@ pointer is over it); one that asks never to expire still leaves after
 popover colours (`--banner-bg`, `--banner-fg`), with no blur. A click runs its default
 action, its buttons their actions, × (in its top-right corner while hovered) or a swipe
 sideways (a drag, or two fingers on a touchpad)
-dismisses it. The clock opens the history, grouped by app, with × and "Clear all", and a
-Do Not Disturb switch (no banners but critical ones); both are kept in
+dismisses it. The clock opens the Notification Centre, a panel down the output's right
+(namespace `rust-wl-shell-centre`): a Do Not Disturb switch (no banners but critical
+ones), then the history, grouped by app, with × and "Clear all"; a click elsewhere, the
+clock again, or Escape closes it. Both are kept in
 `$XDG_STATE_HOME/rust-wl-shell/notifications.json` across restarts.
 
 The OSD, a pill near the bottom of the focused output, shows the volume or brightness

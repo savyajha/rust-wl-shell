@@ -83,6 +83,15 @@ window {
   --close-bg-hover: mix(var(--close-bg), var(--close-fg), 0.15);
   --close-outline: transparent;
 
+  /* The Notification Centre: a solid panel, in the popovers' colours, outlined as the
+     banners; roomy. */
+  --centre-bg: @popover_bg_color;
+  --centre-fg: @popover_fg_color;
+  --centre-outline: var(--banner-outline);
+  --centre-padding: var(--space-xxl);
+  --centre-spacing: var(--space-xxl);
+  --centre-card-gap: var(--space-m);
+
   /* The banners, as the popovers: opaque, in the theme's popover colours, outlined as
      libadwaita's popovers are. */
   --banner-bg: @popover_bg_color;
@@ -369,10 +378,8 @@ window.notification > .card {
   background-color: var(--close-bg-hover);
 }
 
-popover.item-popover button.clear {
-  all: unset;
-  opacity: var(--dim);
-  padding: 0 var(--space-xs);
+.card .actions {
+  border-spacing: var(--space-s);
 }
 
 .card button.action,
@@ -385,16 +392,52 @@ popover.item-popover button.clear {
   padding: var(--space-xs) var(--space-xl);
 }
 
-popover.item-popover .history .card.row {
-  padding: var(--space-s);
-  border-radius: var(--radius-m);
-  background-color: var(--card);
+/* The Notification Centre: a solid panel down the output's right, below the bar, in the
+   popovers' colours, outlined as the banners (the clear window around it only its slide);
+   Do Not Disturb, "Notifications" and "Clear all", then a group per app, each card as a
+   banner's. */
+window.centre {
+  background: none;
 }
 
-popover.item-popover .groups {
+window.centre .panel {
+  background-color: var(--centre-bg);
+  color: var(--centre-fg);
+  border: var(--outline-width) solid var(--centre-outline);
+  border-radius: var(--panel-radius);
+  padding: var(--centre-padding);
+  border-spacing: var(--centre-spacing);
+}
+
+window.centre .title {
+  font-weight: 700;
+}
+
+window.centre .header,
+window.centre .switch-row {
   border-spacing: var(--space-m);
 }
 
-popover.item-popover .group {
-  border-spacing: var(--space-xs);
+window.centre button.clear {
+  all: unset;
+  opacity: var(--dim);
+  padding: 0 var(--space-xs);
+}
+
+window.centre .empty {
+  opacity: var(--dim);
+}
+
+window.centre .list {
+  border-spacing: var(--centre-spacing);
+}
+
+window.centre .group {
+  border-spacing: var(--centre-card-gap);
+}
+
+window.centre .card {
+  padding: var(--space-l) var(--space-xl);
+  border-radius: var(--radius-m);
+  background-color: var(--card);
 }

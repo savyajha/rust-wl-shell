@@ -14,6 +14,7 @@ use tracing::info;
 use crate::Marks;
 use crate::bar::{self, Bar, Msg};
 use crate::blur::{Blur, Corners};
+use crate::centre::Centre;
 use crate::dialog::Dialog;
 use crate::notifications::Banners;
 use crate::osd::Osd;
@@ -23,6 +24,8 @@ struct Shell {
     config: Rc<Config>,
     senders: Senders,
     banners: Rc<RefCell<Banners>>,
+    /// Opened by the clocks; none without the notification server.
+    centre: Option<Rc<Centre>>,
     dialog: Rc<Dialog>,
     osd: Option<Osd>,
     /// The bars' blur.
@@ -53,10 +56,18 @@ pub fn start(
     let osd_blur = blur.clone().filter(|_| !config.niri_blur_rule);
     let s = &senders;
     let dialog = Dialog::new(s.network.clone(), s.answers.clone(), s.power.clone());
-    let banners = Banners::new(&config, s.notifications.clone());
+    let banners = Rc::new(RefCell::new(Banners::new(&config, s.notifications.clone())));
+    let centre = (config.notifications).then(|| {
+        Rc::new(Centre::new(
+            &config,
+            s.notifications.clone(),
+            banners.clone(),
+        ))
+    });
     let shell = Rc::new(RefCell::new(Shell {
         dialog,
-        banners: Rc::new(RefCell::new(banners)),
+        banners,
+        centre,
         senders,
         osd: config.osd.then(|| Osd::new(&config, &osd_blur)),
         config: Rc::new(config),
@@ -109,7 +120,7 @@ impl Shell {
                 monitor: monitor.clone(),
                 config: self.config.clone(),
                 senders: self.senders.clone(),
-                banners: self.banners.clone(),
+                centre: self.centre.clone(),
                 dialog: self.dialog.clone(),
             })
             .detach();
@@ -139,6 +150,9 @@ impl Shell {
         if let Update::Notifications(state) = &update {
             let focused = self.focused();
             self.banners.borrow_mut().show(state, focused.as_ref());
+            if let Some(centre) = &self.centre {
+                centre.show(state);
+            }
         }
         if let Update::Niri(snapshot) = &update {
             self.dialog.focus(snapshot.focused_output.clone());

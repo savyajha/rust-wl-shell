@@ -68,15 +68,15 @@ impl Banners {
             let (n, window, countdown) = &self.shown[i];
             match (hidden, window) {
                 (true, Some(window)) => {
-                    // Its countdown runs on: kept from the window's own end.
-                    let source = countdown.as_ref().and_then(|c| c.timer.take());
-                    window.destroy();
-                    match (countdown, source) {
-                        (Some(c), Some(source)) => *c.timer.borrow_mut() = Some(source),
-                        // Paused by the pointer, which has left with the window.
-                        (Some(c), None) if c.left.get().1.is_none() => c.resume(),
-                        _ => {}
+                    // Its countdown runs on; paused by the pointer, which has left with
+                    // the window, it resumes.
+                    if let Some(c) = countdown
+                        && c.timer.borrow().is_none()
+                        && c.left.get().1.is_none()
+                    {
+                        c.resume();
                     }
+                    window.destroy();
                     self.shown[i].1 = None;
                 }
                 (false, None) => {
@@ -97,9 +97,13 @@ impl Banners {
         self.shown.retain(|(shown, window, countdown)| {
             let kept = state.banners.contains(shown);
             if !kept {
-                // Gone from the store already: its timer is not to tell it.
-                if let Some(source) = countdown.as_ref().and_then(|c| c.timer.take()) {
-                    source.remove();
+                // Gone from the store already: its timer is not to tell it, nor to start
+                // again (its menu closing with the window, as if paused by it).
+                if let Some(c) = countdown {
+                    if let Some(source) = c.timer.take() {
+                        source.remove();
+                    }
+                    c.left.set((Duration::ZERO, Some(Instant::now())));
                 }
                 if let Some(window) = window {
                     window.destroy();
@@ -168,68 +172,96 @@ impl Banners {
         }
         let requests = self.requests.clone();
         let id = n.id;
-        // One action a button on the right; more, a menu ("Options"), as macOS's.
+        // Two buttons at most, on the right: one or two actions each a button; more, the
+        // first one's, then "Options", a menu of the others (`default` is a click on the
+        // card).
         let actions: Vec<_> = n
             .actions
             .iter()
             .filter(|(key, _)| key != "default")
             .collect();
-        let (side, menu) = match actions[..] {
-            [] => (None, None),
-            [(key, label)] => {
-                let button = gtk::Button::with_label(label);
-                let (requests, key) = (requests.clone(), key.clone());
-                button.connect_clicked(move |button| act(&requests, id, &key, button));
-                (Some(button.upcast::<gtk::Widget>()), None)
-            }
-            _ => {
-                let (rows, menu) = (
-                    gtk::Box::new(gtk::Orientation::Vertical, 0),
-                    gtk::Popover::new(),
-                );
-                for (key, label) in actions {
-                    let text = gtk::Label::builder().label(label).xalign(0.0).build();
-                    let row = gtk::Button::builder()
-                        .child(&text)
-                        .css_classes(["row"])
-                        .build();
-                    row.update_property(&[gtk::accessible::Property::Label(label)]);
-                    let (requests, key, menu) = (requests.clone(), key.clone(), menu.clone());
-                    row.connect_clicked(move |row| {
-                        act(&requests, id, &key, row);
-                        menu.popdown();
-                    });
-                    rows.append(&row);
+        // A button for an action, labelled with its key if it has no label.
+        let button = |label: &str, key: &str| {
+            let button = gtk::Button::with_label(if label.is_empty() { key } else { label });
+            let (requests, key) = (requests.clone(), key.to_owned());
+            button.connect_clicked(move |button| act(&requests, id, &key, button));
+            button
+        };
+        let (side, options) = match actions.split_first() {
+            None => (None, None),
+            Some(((key, label), rest)) => {
+                let side = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                side.add_css_class("actions");
+                // Short on the card: a long label ellipsized, the text and width kept.
+                let short = |button: gtk::Button| {
+                    if let Some(text) = button.child().and_downcast::<gtk::Label>() {
+                        text.set_ellipsize(pango::EllipsizeMode::End);
+                        text.set_max_width_chars(12);
+                    }
+                    button
+                };
+                side.append(&short(button(label, key)));
+                if let [(key, label)] = rest {
+                    side.append(&short(button(label, key)));
                 }
-                menu.set_child(Some(&rows));
-                menu.add_css_class("item-popover");
-                menu.set_has_arrow(false);
-                let button = gtk::MenuButton::builder()
-                    .label("Options")
-                    .popover(&menu)
-                    .build();
-                button.set_always_show_arrow(true);
-                (Some(button.upcast()), Some(menu))
+                let options = (rest.len() > 1).then(|| {
+                    let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                    let menu = gtk::Popover::builder()
+                        .child(&rows)
+                        .css_classes(["item-popover"])
+                        .has_arrow(false)
+                        .build();
+                    for (key, label) in rest {
+                        let row = button(label, key);
+                        row.set_css_classes(&["row"]);
+                        if let Some(text) = row.child().and_downcast::<gtk::Label>() {
+                            text.set_xalign(0.0);
+                        }
+                        let menu = menu.clone();
+                        row.connect_clicked(move |_| menu.popdown());
+                        rows.append(&row);
+                    }
+                    let options = gtk::MenuButton::builder()
+                        .label("Options")
+                        .popover(&menu)
+                        .always_show_arrow(true)
+                        .build();
+                    side.append(&options);
+                    (options, menu)
+                });
+                let mut child = side.first_child();
+                while let Some(widget) = child {
+                    widget.add_css_class("action");
+                    child = widget.next_sibling();
+                }
+                (Some(side.upcast::<gtk::Widget>()), options)
             }
         };
-        if let Some(side) = &side {
-            side.add_css_class("action");
-        }
-        let card = content(n, side.as_ref(), None);
-        if let (Some(menu), Some(button)) = (&menu, &side) {
+        let card = content(n, side.as_ref(), false);
+        let menu = options.as_ref().map(|(_, menu)| menu.clone());
+        if let Some((button, menu)) = &options {
             // The menu takes the keyboard while open (Escape), as the bar's popovers; below
             // the banner, at the button's right edge, as macOS's.
             menu.set_halign(gtk::Align::End);
-            let (shown, button) = (window.clone(), button.clone());
-            menu.connect_show(move |menu| {
-                if let Some(b) = button.compute_bounds(&shown) {
-                    let below = shown.height() as f32 - b.y() - b.height();
-                    menu.set_offset(0, below as i32 + MENU_GAP);
+            // Weak: the menu lives in the window.
+            menu.connect_show(glib::clone!(
+                #[weak]
+                window,
+                #[weak]
+                button,
+                move |menu| {
+                    if let Some(b) = button.compute_bounds(&window) {
+                        let below = window.height() as f32 - b.y() - b.height();
+                        menu.set_offset(0, below as i32 + MENU_GAP);
+                    }
+                    window.set_keyboard_mode(KeyboardMode::OnDemand);
                 }
-                shown.set_keyboard_mode(KeyboardMode::OnDemand);
-            });
-            let closed = window.clone();
-            menu.connect_closed(move |_| closed.set_keyboard_mode(KeyboardMode::None));
+            ));
+            menu.connect_closed(glib::clone!(
+                #[weak]
+                window,
+                move |_| window.set_keyboard_mode(KeyboardMode::None)
+            ));
         }
         card.add_overlay(&close(n, requests.clone()));
         window.set_child(Some(&card));
@@ -274,7 +306,7 @@ impl Banners {
             card.add_controller(click);
         }
         if let Some(countdown) = countdown {
-            countdown.follow(&card, &window, menu.as_ref());
+            countdown.follow(&card, menu.as_ref());
         }
         window.set_visible(true);
         window
@@ -305,10 +337,8 @@ impl Countdown {
         *self.timer.borrow_mut() = Some(source);
     }
 
-    /// The clock stopped while the pointer is over `card`, or its `menu` is open. Destroyed
-    /// with `window` still pending (not by `Banners`, which takes it first: its output
-    /// gone), the banner is expired at once.
-    fn follow(&self, card: &gtk::Overlay, window: &gtk::Window, menu: Option<&gtk::Popover>) {
+    /// The clock stopped while the pointer is over `card`, or its `menu` is open.
+    fn follow(&self, card: &gtk::Overlay, menu: Option<&gtk::Popover>) {
         let hover = gtk::EventControllerMotion::new();
         let hovered = Rc::new(Cell::new(false));
         let (paused, over) = (self.clone(), hovered.clone());
@@ -340,13 +370,6 @@ impl Countdown {
                 }
             });
         });
-        let pending = self.clone();
-        window.connect_destroy(move |_| {
-            if let Some(source) = pending.timer.take() {
-                source.remove();
-                let _ = pending.requests.send(Request::Expired(pending.id));
-            }
-        });
     }
 }
 
@@ -371,14 +394,10 @@ pub fn act(
 
 /// A notification's card, as macOS's: its app's icon (full colour, from its desktop file,
 /// else the icon it sent), or its image with the app's icon as a badge on it; the summary,
-/// with the time after it in the history (`times`, to refresh), the body (three lines at
+/// with the time after it (`time`: in the Notification Centre), the body (three lines at
 /// most); `side` (its actions) on the right, the room for its × (`close`) kept after them.
 /// An overlay, for its ×.
-pub fn content(
-    n: &Notification,
-    side: Option<&gtk::Widget>,
-    times: Option<&Times>,
-) -> gtk::Overlay {
+pub fn content(n: &Notification, side: Option<&gtk::Widget>, time: bool) -> gtk::Overlay {
     let main = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     main.add_css_class("main");
     let slot = gtk::Overlay::new();
@@ -424,11 +443,10 @@ pub fn content(
         .build();
     summary.add_css_class("summary");
     top.append(&summary);
-    if let Some(times) = times {
+    if time {
         let time = gtk::Label::new(Some(&ago(n.time)));
         time.add_css_class("time");
         top.append(&time);
-        times.borrow_mut().push((time, n.time));
     }
     text.append(&top);
     if !n.body.is_empty() {
@@ -499,11 +517,8 @@ fn app_icon(n: &Notification) -> gtk::Image {
     }
 }
 
-/// The history's times ("5m"), with when each notification came, to refresh.
-pub type Times = RefCell<Vec<(gtk::Label, u64)>>;
-
 /// How long ago `time` (seconds since 1970) was: "now", "5m", "2h", "3d".
-pub fn ago(time: u64) -> String {
+fn ago(time: u64) -> String {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
     let secs = now.map_or(0, |d| d.as_secs()).saturating_sub(time);
     match secs {

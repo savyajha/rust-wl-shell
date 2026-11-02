@@ -37,9 +37,9 @@ pub struct Config {
     /// The space between the bar and its popovers (vibepanel's `popover_offset`).
     #[knuffel(child, unwrap(argument), default = 6)]
     pub popover_gap: u32,
-    /// The notifications' history's height before it scrolls.
-    #[knuffel(child, unwrap(argument), default = 480)]
-    pub history_height: u32,
+    /// The Notification Centre's width (the clock opens it, down the output's right).
+    #[knuffel(child, unwrap(argument), default = 380)]
+    pub notification_centre_width: u32,
     /// The OSD's distance from the bottom edge, and how long it shows, in ms.
     #[knuffel(child, unwrap(argument), default = 48)]
     pub osd_margin: u32,
@@ -195,7 +195,11 @@ impl Config {
             ("popover-radius", config.popover_radius, 0..=64),
             ("panel-radius", config.panel_radius, 0..=64),
             ("popover-gap", config.popover_gap, 0..=64),
-            ("history-height", config.history_height, 100..=4000),
+            (
+                "notification-centre-width",
+                config.notification_centre_width,
+                100..=2000,
+            ),
             ("osd-margin", config.osd_margin, 0..=1000),
             ("osd-timeout", config.osd_timeout, 100..=60_000),
             ("notification-gap", config.notification_gap, 0..=200),
@@ -295,7 +299,7 @@ mod tests {
             (config.swipe_distance, config.workspace_animation),
             (100, 200)
         );
-        assert_eq!(config.history_height, 480);
+        assert_eq!(config.notification_centre_width, 380);
     }
 
     #[test]
@@ -326,7 +330,7 @@ mod tests {
             popover-radius 8
             panel-radius 12
             popover-gap 4
-            history-height 600
+            notification-centre-width 400
             osd-margin 64
             osd-timeout 2000
             notification-gap 10
@@ -373,7 +377,7 @@ mod tests {
                 popover_radius: 8,
                 panel_radius: 12,
                 popover_gap: 4,
-                history_height: 600,
+                notification_centre_width: 400,
                 osd_margin: 64,
                 osd_timeout: 2000,
                 notification_gap: 10,

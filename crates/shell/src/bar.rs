@@ -2,7 +2,6 @@
 //! the brightness, the volume, VPN, Bluetooth, the network, the battery (with the power
 //! mode) and the clock on the right.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::{self as gtk, gdk, prelude::*};
@@ -13,11 +12,11 @@ use shell_core::niri::Workspace;
 use shell_core::{Senders, Update};
 
 use crate::bluetooth::BluetoothItem;
+use crate::centre::Centre;
 use crate::clock::ClockItem;
 use crate::dialog::Dialog;
 use crate::items::{BatteryItem, LayoutItem};
 use crate::network::{NetworkItem, VpnItem};
-use crate::notifications::Banners;
 use crate::popover::Item;
 use crate::power::PowerItem;
 use crate::sliders::{BrightnessItem, VolumeItem};
@@ -32,7 +31,7 @@ pub struct Bar {
     workspaces: Vec<Workspace>,
     switcher: Workspaces,
     app: String,
-    /// The clock, with the notifications' history in its popover.
+    /// The clock, which opens the Notification Centre.
     clock: ClockItem,
     /// After the clock.
     power: Option<PowerItem>,
@@ -52,8 +51,8 @@ pub struct Init {
     pub monitor: gdk::Monitor,
     pub config: Rc<Config>,
     pub senders: Senders,
-    /// The shell's banners, hidden while the clock's popover is open.
-    pub banners: Rc<RefCell<Banners>>,
+    /// The shell's one Notification Centre (none without the notification server).
+    pub centre: Option<Rc<Centre>>,
     /// The shell's one password dialog.
     pub dialog: Rc<Dialog>,
 }
@@ -126,13 +125,7 @@ impl Component for Bar {
             switcher: Workspaces::new(init.senders.niri.clone(), config),
             app: String::new(),
             power: (config.power).then(|| PowerItem::new(init.senders.power.clone())),
-            clock: ClockItem::new(
-                config,
-                config
-                    .notifications
-                    .then(|| init.senders.notifications.clone()),
-                init.banners.clone(),
-            ),
+            clock: ClockItem::new(init.centre.clone(), &init.monitor),
             layout: (config.keyboard_layout).then(|| LayoutItem::new(init.senders.niri.clone())),
             brightness: (config.brightness)
                 .then(|| BrightnessItem::new(init.senders.brightness.clone())),
@@ -178,7 +171,7 @@ impl Component for Bar {
         for button in buttons.into_iter().flatten() {
             widgets.right.append(&button);
         }
-        widgets.right.append(&model.clock.item.button);
+        widgets.right.append(&model.clock.button);
         if let Some(power) = &model.power {
             widgets.right.append(&power.item.button);
         }

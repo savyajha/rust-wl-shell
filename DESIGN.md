@@ -288,9 +288,11 @@ In the UI (`notifications.rs`, `clock.rs`):
   URI, else `application-x-executable`), or its image (`image-data`, as a texture) with
   the app's icon a 16 px badge on its corner; the summary in bold (two lines at most)
   and the body in Pango markup (as
-  it is, if it does not parse), three lines at most; no app name. One action other than
-  `default` is a button on the right; more are "Options", a menu button whose popover
-  (the bar's popovers' look) lists them, below the banner at the button's right edge, taking the keyboard while open
+  it is, if it does not parse), three lines at most; no app name. Two buttons at most, on
+  the right (`default`, its click, is none of them): one or two actions other than
+  `default` each a button (its label ellipsized past 12 characters, its key with no
+  label); three or more, the first one's button and "Options", a menu
+  button whose popover (the bar's popovers' look) lists the others, below the banner at the button's right edge, taking the keyboard while open
   (`OnDemand`, as the bar's popovers; Escape closes it). × is a square in the theme's
   red (`@destructive_bg_color`, its glyph `@destructive_fg_color`; libadwaita's in
   `fallback.css`), rounded at 6 px as niri's windows, in the card's top-right corner,
@@ -303,11 +305,15 @@ In the UI (`notifications.rs`, `clock.rs`):
   tree, for screen readers, named `Dismiss "summary"`, else after the app, else
   `Dismiss`). The history's rows use the same card, without actions, its × in the same
   corner, with the time after the summary, muted ("now", "5m",
-  "2h"; refreshed each time the popover shows). Its countdown (`Countdown`) pauses while the pointer
-  is over it, or its menu is open (resumed when it closes only if the pointer has left); destroyed with its window still pending (its output gone), the banner
-  expires: a replaced notification's banner is built again, with its whole time. While
-  a clock's popover (the history) is open, the banners are hidden, their countdowns
-  still running: their windows are destroyed (their countdowns taken out first) and
+  "2h"; as of its opening or last change). Its countdown (`Countdown`) pauses while the pointer
+  is over it, or its menu is open (resumed when it closes only if the pointer has left).
+  A replaced notification's banner is built again, with its whole time, the old one's
+  countdown finished first (so that its menu closing with it does not resume it). The
+  `Banners` hold each banner's window until they destroy it (gtk4-layer-shell keeps a
+  window whose output goes), and the menu's handlers hold the window weakly. While
+  the Notification Centre (the history) is open, the banners are hidden, their countdowns
+  still running: their windows are destroyed (a countdown paused by the pointer resumes)
+  and
   built again when it closes, and a banner arriving meanwhile gets its window then.
   Not hidden windows: GTK 4.22's AT-SPI root answers `GetChildAtIndex` for an index
   past its shown windows (a client's stale count) with its last window, shown or not,
@@ -333,13 +339,40 @@ In the UI (`notifications.rs`, `clock.rs`):
   not noticed); the banners stack by their heights as measured on the focused output,
   so a banner shown on another output (the focus moved) can leave a gap; the `resident`
   hint is not honoured (acting on a notification always closes it).
-- the clock is an item now (with `notifications-disabled-symbolic` before the time
+- the clock is a button (with `notifications-disabled-symbolic` before the time
   while Do Not Disturb is on, as macOS's Focus moon, "Do Not Disturb" for screen
-  readers): its popover has "Do Not Disturb" (a switch), then
-  "Notifications" with "Clear all", and the history grouped by app (the app with the
-  newest first), each entry a card as a banner's, with ×, swiped away, a click its
-  default action while it still has one; "No notifications" when empty. It scrolls
-  past 480 px.
+  readers) that opens the Notification Centre (`centre.rs`) on its output, as macOS
+  Sonoma's: a solid panel down the output's right, below the bar (the bar's exclusive
+  zone; it reserves none, overlaying the windows), `notification-centre-width` (380 px)
+  wide, `notification-gap` from the edges, in the popovers' colours, outlined as the
+  banners (`--centre-bg`, `--centre-fg`, `--centre-outline`, its spacing
+  `--centre-padding`, `--centre-spacing`, `--centre-card-gap`). It has "Do Not
+  Disturb" (a switch, libadwaita's as the popovers'), then "Notifications" with "Clear
+  all", and the history grouped by app (the app with the newest first, `centre::groups`),
+  each entry a card as a banner's, with ×, swiped away, a click its default action
+  while it still has one (closing it); "No notifications" when empty. It scrolls. The
+  list is built again only when the history changes (a banner's countdown, say, leaves
+  it), so a card keeps its hover, a swipe and the keyboard. It is
+  a layer surface on the top layer (namespace `rust-wl-shell-centre`, for a niri
+  shadow rule), its window built on opening and destroyed on closing (GTK 4.22's
+  hidden-toplevel crash, as the OSD and the dialog), its contents built again on each
+  change while open; it slides in from the right (a `GtkRevealer`, 200 ms; niri 26.04
+  animates no layer surface), and out, its window destroyed 200 ms after on a plain
+  timer (not the revealer's end, which needs frames an unplugged or locked output does
+  not draw). It closes on the clock,
+  on Escape, and on a click anywhere else: it takes the keyboard `OnDemand`, which niri
+  gives a layer surface as it maps and takes away on a press on anything but it
+  (`focus_layer_surface_if_on_demand`), so its window's `is-active` turning false
+  closes it (the open window's only: a closing one's unmap turns its own false). A
+  click on the clock while it is open first takes its keyboard (closing it), then
+  reaches the clock: the clock decides at the press (a capture-phase click gesture
+  noting whether it was open), so that click closes it rather than opening it again;
+  with no press (a screen reader's click) it goes by the state then. The clock is
+  `Expanded` for screen readers while it is open. Opening it closes an open item popover; an item popover
+  opening takes its keyboard, closing it; the banners hide while it is open. Per-app
+  collapsible stacks are for later. Known: a screen reader opening it from a bar on an
+  output niri has not focused gets no keyboard there (niri focuses the active output's
+  surfaces), and Escape in niri's overview is niri's.
 
 ## The power menu
 
@@ -459,9 +492,7 @@ Every item's popover is one width, `--popover-width` (320 px, its contents' `min
 whatever it lists: the rows' labels and the titles ellipsize, with a natural width of one
 character (`max-width-chars`), so a long network name never widens it; the Wi-Fi list's
 scrolled window (no horizontal scrolling) takes its child's minimum width, and its
-scrollbar is GTK's overlay indicator, taking no width. Known: the history's cards (in the
-clock's popover) keep their wrapping labels' natural width, so a long notification could
-still widen that popover past it.
+scrollbar is GTK's overlay indicator, taking no width.
 
 The rows to choose from (`Item::rows`) look as macOS's: each a flat button with a hover
 plate, a round icon of 26 px (for the one chosen, `@accent_bg_color` with
@@ -830,19 +861,24 @@ scrolls sideways with ydotool's uinput mouse (QEMU's tablet sends no horizontal 
 2. a banner at the top right, below the bar, opaque in libadwaita's dark popover colour
    (pixels), with the app's name, the summary
    and the body's markup; four sent, three shown, the newest (with buttons) on top (the
-   first gap between banners comes late)
+   first gap between banners comes late); 0 actions no button, 1 its button, 2 two
+   buttons, 3 the first's and "Options" with the other two
 3. the timeouts, each timed alike from before it is sent: "never" capped (2 s) well
    before the default (5 s); a critical one stays; a transient one is not in the
    history, and is closed as expired
 4. a replaced banner gets its whole time, the old one's timer gone; the banners hide
-   while the clock's popover is open (no notification layer in `niri msg layers`) and
+   while the Notification Centre is open (no notification layer in `niri msg layers`) and
    come back; replaces_id: one entry, the new one; an app's CloseNotification: the banner and the
    history entry gone, closed with reason 3
 5. a click on a banner: notify-send --wait sees "default", after an ActivationToken
-   with a token; a button: its key
+   with a token; a button: its key; the history's cards show no actions; two actions
+   around the default, two buttons and no default's; long labels ellipsized, the
+   banner's width kept
 6. a drag sideways dismisses (reason 2, not in the history), a horizontal scroll too
-7. the history in the clock's popover, "Clear all", and the keyboard back with the
-   window after each popover
+7. the history in the Notification Centre, "Clear all", and the keyboard back with the
+   window after each; the Centre a solid panel down the right (380 px, 8 px from the
+   edge, below the bar, to 8 px above the bottom), closed by a click on the desktop, on
+   a window, by Escape and by the clock (not opened anew by it)
 8. Do Not Disturb: no banner, but for a critical one, the history still filling; a
    transient one (`notify-send --wait -e`) returns at once, its close after its id; after
    a restart of the shell's unit the history and Do Not Disturb are still there
