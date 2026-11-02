@@ -203,7 +203,9 @@ pkgs.testers.runNixOSTest {
         nid = as_user(NOTIFY + "-p -t 4000 Short body").strip()
         wait_for_tree(banner_shown("Short"), "the first")
         time.sleep(3)
-        as_user(NOTIFY + f"-r {nid} -t 4000 Longer body")
+        # Its own time long enough to outlast the checks below, which take up to 2 s each
+        # on a slow host (the AT-SPI tree read), and the old one's 4 s would cut it short.
+        as_user(NOTIFY + f"-r {nid} -t 10000 Longer body")
         wait_for_tree(banner_shown("Longer"), "the replacement")
         # Past the old banner's 4 s, well before the new one's.
         time.sleep(2)

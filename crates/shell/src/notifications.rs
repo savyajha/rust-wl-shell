@@ -15,6 +15,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 /// Between a banner and its menu ("Options").
 const MENU_GAP: i32 = 6;
+/// A banner's first moments: the pointer entering it then was there when it showed.
+const SETTLED: Duration = Duration::from_millis(500);
 /// The ×'s size (the stylesheet's `--close-size`, set from here): a banner's window has
 /// half of it around its card's top and right, for its × centred on the card's corner.
 pub const CLOSE_SIZE: i32 = 20;
@@ -252,6 +254,18 @@ impl Banners {
         card.set_margin_end(CLOSE_SIZE / 2);
         window.set_child(Some(&frame));
         input_region(&window, &card, &close);
+        // GTK closes an open popover on a click outside it, and keeps the click: closed
+        // first, by the pointer coming onto the banner, the click (on ×) reaches it. While
+        // the popover holds its grab, the banner gets no motion, only the pointer's enter:
+        // one at once is the banner showing under a still pointer, which leaves it open.
+        let hover = gtk::EventControllerMotion::new();
+        let built = Instant::now();
+        hover.connect_enter(move |_, _, _| {
+            if built.elapsed() > SETTLED {
+                crate::popover::close_open();
+            }
+        });
+        frame.add_controller(hover);
         // The banner follows a swipe sideways, as far as its anchored edge lets it.
         let swiped = self.swipe;
         let moved = glib::clone!(

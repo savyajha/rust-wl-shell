@@ -39,8 +39,8 @@ window {
   --radius-pill: 9999px;
 
   /* Widths and heights. */
-  --popover-width: 220px;
-  --history-width: 320px;
+  /* Every item's popover, whatever it lists. */
+  --popover-width: 320px;
   --osd-level-width: 200px;
   --circle-size: 26px;
   --circle-icon-size: 14px;
@@ -372,10 +372,6 @@ popover.item-popover .history .card.row {
   padding: var(--space-s);
   border-radius: var(--radius-m);
   background-color: var(--card);
-}
-
-popover.item-popover .history {
-  min-width: var(--history-width);
 }
 
 popover.item-popover .groups {

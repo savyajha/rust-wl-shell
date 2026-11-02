@@ -1,13 +1,14 @@
 //! The component every right-side item is built on: a flat button in the bar (hidden until
 //! its item has something to show), opening GTK's own popover under it, as macOS's: no
 //! arrow, a gap from the bar (the bar sets it), and the button highlighted while it is open.
-//! GTK places it, closes it on an outside click (one open at a time) and on Escape; it is
-//! frosted as the bar is.
+//! GTK places it, closes it on an outside click (one open at a time) and on Escape. All
+//! are one width (`--popover-width`): their labels ellipsize (a long network's name), so
+//! that what they list never widens them.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gtk4::{self as gtk, glib, prelude::*};
+use gtk4::{self as gtk, glib, pango, prelude::*};
 use gtk4_layer_shell::{KeyboardMode, LayerShell};
 
 pub struct Item {
@@ -35,8 +36,33 @@ impl Item {
         button.update_property(&[gtk::accessible::Property::Label(name)]);
         // The bar takes no keyboard, so that clicks on it leave the focus where it is; while
         // a popover is open it asks for it on demand, for Escape (a click on any window
-        // takes it back, should it ever be left asked for).
-        popover.connect_show(|popover| keyboard(popover, KeyboardMode::OnDemand));
+        // takes it back, should it ever be left asked for). Asked for from the press that
+        // opens it, so that niri has it before the popover's grab: a grab from a surface
+        // taking no keyboard is the pointer's alone, which niri's screenshot UI ends
+        // without closing the popover, left open past any click outside. A press that opens
+        // nothing (dragged off the button) gives it back, once the click is done with.
+        let press = gtk::GestureClick::new();
+        press.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let pressed = popover.clone();
+        press.connect_pressed(move |_, _, _, _| keyboard(&pressed, KeyboardMode::OnDemand));
+        let unopened = popover.clone();
+        let give_back = move || {
+            let popover = unopened.clone();
+            glib::idle_add_local_once(move || {
+                if !popover.is_visible() {
+                    keyboard(&popover, KeyboardMode::None);
+                }
+            });
+        };
+        let (released, cancelled) = (give_back.clone(), give_back.clone());
+        press.connect_released(move |_, _, _, _| released());
+        press.connect_cancel(move |_, _| cancelled());
+        press.connect_stopped(move |_| give_back());
+        button.add_controller(press);
+        popover.connect_show(|popover| {
+            keyboard(popover, KeyboardMode::OnDemand);
+            OPEN.with(|open| open.set(Some(popover)));
+        });
         popover.connect_closed(|popover| keyboard(popover, KeyboardMode::None));
         Self {
             button,
@@ -93,6 +119,8 @@ impl Item {
                 .label(&entry.label)
                 .hexpand(true)
                 .xalign(0.0)
+                .ellipsize(pango::EllipsizeMode::End)
+                .max_width_chars(1)
                 .build();
             content.append(&label);
             if let Some(after) = &entry.after {
@@ -151,6 +179,19 @@ impl Circle {
             Circle::Icon(name) => gtk::Image::from_icon_name(name).upcast(),
             Circle::Text(text) => gtk::Label::new(Some(text)).upcast(),
         }
+    }
+}
+
+thread_local! {
+    /// The item popover open last (one at a time), for `close_open`.
+    static OPEN: glib::WeakRef<gtk::Popover> = glib::WeakRef::new();
+}
+
+/// Close the item popover that is open, if one is: called when the pointer reaches a
+/// banner, as GTK gives a click outside an open popover (on a banner) to closing it alone.
+pub fn close_open() {
+    if let Some(popover) = OPEN.with(glib::WeakRef::upgrade) {
+        popover.popdown();
     }
 }
 
@@ -244,7 +285,12 @@ impl Switch {
 
 /// A popover's title: bold, at the start.
 pub fn title(text: &str) -> gtk::Label {
-    let title = gtk::Label::builder().label(text).xalign(0.0).build();
+    let title = gtk::Label::builder()
+        .label(text)
+        .xalign(0.0)
+        .ellipsize(pango::EllipsizeMode::End)
+        .max_width_chars(1)
+        .build();
     title.add_css_class("title");
     title
 }
@@ -255,7 +301,11 @@ pub fn section(text: &str) -> (gtk::Box, gtk::Box, gtk::Label) {
     let section = gtk::Box::new(gtk::Orientation::Vertical, 0);
     section.add_css_class("section");
     let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let note = gtk::Label::builder().xalign(0.0).wrap(true).build();
+    let note = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .max_width_chars(1)
+        .build();
     note.add_css_class("line");
     section.append(&title(text));
     section.append(&rows);

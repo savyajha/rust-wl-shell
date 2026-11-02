@@ -433,8 +433,32 @@ outside click (so one is open at a time) and on Escape. The bar takes no
 keyboard, so that clicks on it leave the focus with the window; while a popover is open
 the bar's layer surface asks for the keyboard `OnDemand`, so that Escape reaches it,
 and gives it back (`None`) when the popover closes. `OnDemand` rather than `Exclusive`:
-if the keyboard were ever left asked for, a click on any window would take it back. A
-popover stays open over niri's overview.
+if the keyboard were ever left asked for, a click on any window would take it back. It
+is asked for from the press on the button, before the popover's grab: niri gives a grab
+from a layer surface that takes no keyboard (its interactivity, committed, at the grab)
+the pointer's alone, and its screenshot UI ends the pointer's grab without closing the
+popover (only a keyboard grab is closed when the focus moves), which then stayed open past
+any click outside. A press that opens nothing (dragged off the button) gives the keyboard
+back once its click is done, else niri would give the bar the keyboard on its next click.
+A popover opened from the keyboard or by AT-SPI has no press: it asks for the keyboard
+when it shows, after its grab, so its grab is still the pointer's alone (step 9, the
+keyboard and screen readers, is to revisit this). Its popover's `xdg_popup` grab is niri's (smithay's
+`PopupPointerGrab`): a press on another client's surface, or on none, closes it; a press
+on another surface of ours goes to that surface, where GTK's autohide (GDK's
+`check_autohide`) closes the popover and keeps the press. So the pointer coming onto a
+banner closes an open popover first (`popover::close_open`), and a click on the banner's ×
+dismisses it. While the popover holds its grab the banner gets no motion, only the
+pointer's enter (seen in nested niri); an enter in the banner's first 500 ms is the banner
+showing under a still pointer, which leaves the popover open (but a banner moved under it
+as the stack shifts, older than that, still closes it). A popover stays open over niri's overview.
+
+Every item's popover is one width, `--popover-width` (320 px, its contents' `min-width`),
+whatever it lists: the rows' labels and the titles ellipsize, with a natural width of one
+character (`max-width-chars`), so a long network name never widens it; the Wi-Fi list's
+scrolled window (no horizontal scrolling) takes its child's minimum width, and its
+scrollbar is GTK's overlay indicator, taking no width. Known: the history's cards (in the
+clock's popover) keep their wrapping labels' natural width, so a long notification could
+still widen that popover past it.
 
 The rows to choose from (`Item::rows`) look as macOS's: each a flat button with a hover
 plate, a round icon of 26 px (for the one chosen, `@accent_bg_color` with

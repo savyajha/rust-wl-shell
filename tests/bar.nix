@@ -108,6 +108,9 @@ pkgs.testers.runNixOSTest {
         # but hidden: the VM has no wlsunset unit.
         keep-awake = false;
         power = false;
+        # Longer than the default 1.5 s: a read of the AT-SPI tree takes up to 2 s on a
+        # slow host (a laptop on battery, in power-saver), and the OSD must show in one.
+        osd-timeout = 4000;
       })
     ];
     environment.systemPackages = [
@@ -189,7 +192,7 @@ pkgs.testers.runNixOSTest {
 
     def glimpse(check, what):
         """`check` true of the tree at some point in 10 s, the tree read again and again
-        (not once a second): for the OSD, shown for 1.5 s."""
+        (not once a second): for the OSD, shown for 4 s here."""
         with machine.nested(f"glimpsing {what} in the AT-SPI tree"):
             end = time.time() + 10
             while time.time() < end:
@@ -315,11 +318,11 @@ pkgs.testers.runNixOSTest {
         assert not osd_shown(t), "an OSD at start-up"
         # From outside the shell: the item follows, and the OSD shows, then hides.
         from_outside("set-volume @DEFAULT_AUDIO_SINK@ 0.30", lambda: volume() == 30)
-        # The OSD first: it shows for 1.5 s only, the item stays.
+        # The OSD first: it shows for 4 s only, the item stays.
         glimpse(has("label", "30"), "the OSD with 30")
         wait_for_tree(has("button", "Volume 30%"), "the volume item at 30 %")
         machine.send_monitor_command(f"screendump {machine.out_dir}/osd.ppm gpu 0")
-        wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden after 1.5 s")
+        wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden after its 4 s")
         # Its popover: Sound, the slider (after its mute button), Output, and a row per
         # available port of the two hardware sinks, the one playing checked.
         click_item(1)
@@ -376,7 +379,7 @@ pkgs.testers.runNixOSTest {
         retry(lambda _: keyboard_free(), 10)
         # Mute from outside: the item says so, and the OSD shows.
         from_outside("set-mute @DEFAULT_AUDIO_SINK@ 1", muted)
-        # The OSD first: it shows for 1.5 s only, the item stays.
+        # The OSD first: it shows for 4 s only, the item stays.
         glimpse(osd_shown, "the OSD for mute")
         wait_for_tree(has("button", "Volume muted"), "the volume item muted")
         wait_for_tree(lambda t: not osd_shown(t), "the OSD hidden")

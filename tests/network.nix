@@ -9,7 +9,13 @@
 #   1. the network item follows NM: offline, then each network joined
 #   2. the Wi-Fi popover lists the networks in range under "Other Networks", then the
 #      known ones above, the current one checked; with many networks the list scrolls,
-#      and the popover stays inside the output
+#      and the popover stays inside the output; its width stays as "Other Networks"
+#      opens and closes (a printer's long name ellipsized); a click outside closes it,
+#      and niri's screenshot UI does (with the bar's keyboard asked for at the press);
+#      a banner over it: shown under a still pointer, it stays; the pointer coming onto
+#      the banner closes it, and the banner's x dismisses the banner (a click on it is
+#      not taken by the popover's closing); a press on the item dragged off opens
+#      nothing and leaves the keyboard with the window
 #   3. joining the open network takes a click
 #   4. joining the WPA2 one asks for its password in the dialog (on the focused output,
 #      with the keyboard), opaque (its background's pixels unchanged when the desktop
@@ -64,7 +70,11 @@ let
     "alice" PEAP,TTLS
     "alice" MSCHAPV2,TTLS-MSCHAPV2,TTLS-PAP "campus-pass" [2]
   '';
-  # Each radio also has seven open networks, "Extra N-M", so that the list overflows.
+  # Each radio also has seven open networks, "Extra N-M", so that the list overflows; one
+  # has a long name, as a printer's, which the popover ellipsizes.
+  extra = radio: m:
+    if radio == "2" && m == 7 then "HP-Print-FB-LaserJet Pro MFP"
+    else "Extra ${radio}-${toString m}";
   ap = radio: text: pkgs.writeText "wlan${radio}.conf" (
     ''
       driver=nl80211
@@ -75,7 +85,7 @@ let
     ''
     + lib.concatMapStrings (m: ''
       bss=wlan${radio}_${toString m}
-      ssid=Extra ${radio}-${toString m}
+      ssid=${extra radio m}
       bssid=02:00:00:00:0${radio}:0${toString m}
     '') (lib.range 1 7)
   );
@@ -125,6 +135,8 @@ pkgs.testers.runNixOSTest {
       })
     ];
 
+    # notify-send, for a banner over a popover.
+    environment.systemPackages = [ pkgs.libnotify ];
     boot.kernelModules = [ "mac80211_hwsim" ];
     boot.extraModprobeConfig = "options mac80211_hwsim radios=4";
     networking.networkmanager = {
@@ -240,6 +252,13 @@ pkgs.testers.runNixOSTest {
         """Home's saved password refused: a click on Home, and NM asks the agent, whose
         dialog opens."""
         wait_for_tree(lambda t: ["button", "Wi-Fi: Home"] not in t, "Home gone")
+        # Home in a scan again since its access point restarted: iwd fails a join to a
+        # network missing from its scan ("Connected BSS not in scan results") before NM
+        # asks for secrets, which a slow host (a laptop on battery) made likely.
+        machine.wait_until_succeeds(
+            "nmcli device wifi rescan; nmcli -t -f SSID device wifi list | grep -qx Home",
+            timeout=30,
+        )
         wifi_popover()
         act("Home")
         asked = 'The Wi-Fi network \u201cHome\u201d requires a password.'
@@ -290,6 +309,86 @@ pkgs.testers.runNixOSTest {
         assert scrolled[1] != shot[1], "the list did not scroll"
         item(("Wi-Fi", "Network"))
         typing_reaches_the_window("after-many")
+
+    with subtest("the popover keeps its width, with Other Networks open or not"):
+        def edges():
+            """The popover's left and right edges, below its rounded corners."""
+            move(100, 700)
+            time.sleep(0.5)
+            shot = screen()
+            xs = [x for x in range(300, 1024) if is_popover(pixel(shot, x, HEIGHT + 26))]
+            return min(xs), max(xs)
+        wifi_popover()
+        widths = [edges()]
+        for _ in range(2):
+            act("Other Networks")
+            time.sleep(1)
+            widths.append(edges())
+        print(f"the popover's edges: {widths}")
+        # The printer's long name is listed, ellipsized: the edges stay.
+        assert has("radio button", "HP-Print-FB-LaserJet Pro MFP")(tree()), tree()
+        assert len(set(widths)) == 1, widths
+        left, right = widths[0]
+        assert 320 <= right - left < 350, widths
+        item(("Wi-Fi", "Network"))
+        typing_reaches_the_window("after-width")
+
+    # The network's item: left of the clock and the power button (found once, while
+    # its icon is bright enough to tell).
+    first, last = right_items()[2]
+    network_x = (first + last) // 2
+
+    def click_network():
+        click(network_x, HEIGHT // 2)
+        wait_for_tree(has("switch", "Wi-Fi"), "the Wi-Fi popover, opened by a click")
+
+    with subtest("a click outside closes a popover, also after niri's screenshot UI"):
+        click_network()
+        click(1000, 700)
+        wait_for_tree(lacks("switch", "Wi-Fi"), "closed by a click on the desktop")
+        # The screenshot UI ends the popover's grab: with the keyboard's in it, niri
+        # closes the popover then. With the pointer's alone (the bar asking for the
+        # keyboard too late), the popover stayed open past any click outside.
+        click_network()
+        niri("action screenshot")
+        wait_for_tree(lacks("switch", "Wi-Fi"), "closed by the screenshot UI")
+        machine.send_key("esc")
+        typing_reaches_the_window("after-screenshot-ui")
+
+    with subtest("a press dragged off the item leaves the keyboard with the window"):
+        move(network_x, HEIGHT // 2)
+        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
+        move(network_x, 400)
+        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
+        time.sleep(1)
+        assert lacks("switch", "Wi-Fi")(tree()), "opened by a press dragged off"
+        # A click on the bar (the shown workspace's pill): niri gives the bar the keyboard
+        # only if the press left it asking for it.
+        runs, _ = pills()
+        click_pill(next(run for run in runs if run[2]))
+        typing_reaches_the_window("after-drag-off")
+
+    with subtest("a banner over a popover: its x dismisses it"):
+        click_network()
+        # The pointer still over the popover, where the banner shows: it stays open.
+        move(1024 - 10 - 100, HEIGHT + 40)
+        time.sleep(0.5)
+        nid = as_user("notify-send -p -t 20000 Over popover").strip()
+        wait_for_tree(has("label", "Over"), "the banner")
+        time.sleep(1.5)
+        assert has("switch", "Wi-Fi")(tree()), "closed by a banner under a still pointer"
+        # The pointer off the banner (still over the popover) and back onto it: the popover
+        # closes; then a click on its x, at the card's corner.
+        move(1024 - 10 - 90, HEIGHT + 200)
+        time.sleep(0.5)
+        move(1024 - 10 - 90, HEIGHT + 44)
+        wait_for_tree(lacks("switch", "Wi-Fi"), "the popover closed")
+        move(1024 - 10, HEIGHT + 10)
+        time.sleep(0.5)
+        click(1024 - 10, HEIGHT + 10)
+        wait_for_tree(lacks("label", "Over"), "the banner dismissed by its x")
+        move(100, 700)
+        typing_reaches_the_window("after-banner")
 
     with subtest("an open network joins with a click"):
         other_networks()
