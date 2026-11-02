@@ -178,7 +178,7 @@ impl Banners {
         let actions: Vec<_> = n
             .actions
             .iter()
-            .filter(|(key, _)| key != "default")
+            .filter(|(key, _)| key != "default" && !chromium_settings(n, key))
             .collect();
         // A button for an action, labelled with its key if it has no label.
         let button = |label: &str, key: &str| {
@@ -192,10 +192,14 @@ impl Banners {
             Some(((key, label), rest)) => {
                 let side = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                 side.add_css_class("actions");
-                // Short on the card: a long label ellipsized, the text and width kept.
+                // Short on the card: a long label ellipsized, the text and width kept; a
+                // short one whole (else the body, wrapping, would take its width), up to
+                // 10 characters, so that two still fit the card's width.
                 let short = |button: gtk::Button| {
                     if let Some(text) = button.child().and_downcast::<gtk::Label>() {
+                        let chars = text.label().chars().count().min(10) as i32;
                         text.set_ellipsize(pango::EllipsizeMode::End);
+                        text.set_width_chars(chars);
                         text.set_max_width_chars(12);
                     }
                     button
@@ -390,6 +394,29 @@ pub fn act(
         key: key.into(),
         token,
     });
+}
+
+/// The desktop entries Chromium-based browsers send (`desktop-entry`, Chromium's
+/// `chrome::GetDesktopName`, less ".desktop").
+const CHROMIUMS: [&str; 8] = [
+    "brave-browser",
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-beta",
+    "google-chrome-unstable",
+    "microsoft-edge",
+    "vivaldi-stable",
+];
+
+/// Chromium's own "Settings" action (key `settings`, its `kSettingsButtonId`), which it adds
+/// to every web notification (the site's notification permissions): left out, from a
+/// Chromium-based browser only.
+fn chromium_settings(n: &Notification, key: &str) -> bool {
+    key == "settings"
+        && n.desktop_entry
+            .as_deref()
+            .is_some_and(|entry| CHROMIUMS.contains(&entry))
 }
 
 /// A notification's card, as macOS's: its app's icon (full colour, from its desktop file,

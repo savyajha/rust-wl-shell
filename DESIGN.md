@@ -288,10 +288,15 @@ In the UI (`notifications.rs`, `clock.rs`):
   URI, else `application-x-executable`), or its image (`image-data`, as a texture) with
   the app's icon a 16 px badge on its corner; the summary in bold (two lines at most)
   and the body in Pango markup (as
-  it is, if it does not parse), three lines at most; no app name. Two buttons at most, on
+  it is, if it does not parse), three lines at most; no app name. Chromium-based browsers' own "Settings" action (key `settings`, which
+  Chromium adds to every web notification, from a `desktop-entry` of a Chromium-based
+  browser: Brave, Chromium, Chrome, Edge, Vivaldi, by the desktop names their Linux
+  packages use; a Flatpak's (`com.brave.Browser`, say) or another fork's is not matched)
+  is left out. Two buttons at most, on
   the right (`default`, its click, is none of them): one or two actions other than
-  `default` each a button (its label ellipsized past 12 characters, its key with no
-  label); three or more, the first one's button and "Options", a menu
+  `default` each a button (its label ellipsized past 12 characters, but as wide as its
+  text up to 10, so two still fit, else the wrapping body takes the width and cuts a short one; its key
+  with no label); three or more, the first one's button and "Options", a menu
   button whose popover (the bar's popovers' look) lists the others, below the banner at the button's right edge, taking the keyboard while open
   (`OnDemand`, as the bar's popovers; Escape closes it). × is a square in the theme's
   red (`@destructive_bg_color`, its glyph `@destructive_fg_color`; libadwaita's in
@@ -356,10 +361,16 @@ In the UI (`notifications.rs`, `clock.rs`):
   a layer surface on the top layer (namespace `rust-wl-shell-centre`, for a niri
   shadow rule), its window built on opening and destroyed on closing (GTK 4.22's
   hidden-toplevel crash, as the OSD and the dialog), its contents built again on each
-  change while open; it slides in from the right (a `GtkRevealer`, 200 ms; niri 26.04
-  animates no layer surface), and out, its window destroyed 200 ms after on a plain
-  timer (not the revealer's end, which needs frames an unplugged or locked output does
-  not draw). It closes on the clock,
+  change while open; it slides in from the right and out, 200 ms easing out, as one
+  rigid piece: its whole surface moves, by its right margin (niri places a layer surface
+  past the output's edge with a negative margin, and moves it on each commit), so niri's
+  shadow round it moves with it and its contents keep their size, with no reflow (a `GtkRevealer`
+  slid only its contents, the panel and shadow showing at once). It starts and ends with
+  one pixel on the output, as niri gives frames only to a surface it shows (its width at
+  least 280 px, `notification-centre-width`'s minimum, which the panel always fits, so
+  the margins are right). The steps run on a GLib timer (8 ms), not on the frame clock
+  (each margin goes out with the commit gtk4-layer-shell asks for); its window is destroyed 200 ms after it closes, on a plain timer
+  (an unplugged or locked output draws no frames). A slide started stops one it was in. It closes on the clock,
   on Escape, and on a click anywhere else: it takes the keyboard `OnDemand`, which niri
   gives a layer surface as it maps and takes away on a press on anything but it
   (`focus_layer_surface_if_on_demand`), so its window's `is-active` turning false
@@ -531,10 +542,11 @@ one:
 - the night light and keep awake (`toggles.rs`): click toggles with no popover, flat
   buttons as the items, their state told by their icon, never a fill (only these and
   VPN have an on/off look): `night-light-symbolic`, the theme's moon, or
-  `night-light-disabled-symbolic`; keep awake's cups are the shell's own,
-  `rust-wl-shell-keep-awake-symbolic` steaming and `rust-wl-shell-keep-awake-off-symbolic`
-  empty, installed with it and added to the icon theme's search path at start, as
-  Adwaita has no cup; "Night light: on", "Keep awake: off" for screen readers. A click asks for the
+  `night-light-disabled-symbolic`; keep awake's cup is the shell's own,
+  `rust-wl-shell-keep-awake-symbolic`, installed with it and added to the icon theme's
+  search path at start, as Adwaita has no cup, the same on and off: while on, it has
+  VPN's green tick on its corner (`popover::badged`, one helper for both, the `tick`
+  CSS class); "Night light: on", "Keep awake: off" for screen readers. A click asks for the
   other state, shown once the core says so; hidden until it does.
 - the network: the primary connection's icon (`network-wireless-signal-*-symbolic`
   in four levels, `network-wired-symbolic`, `network-wireless-acquiring-symbolic`, or
@@ -547,7 +559,7 @@ one:
   activates it (on the current one, nothing); on another, an open one joins and a
   secured one opens the dialog.
 - VPN: `network-vpn-symbolic`, hidden with no VPN connection; while one is on, a badge on
-  its bottom-right corner (a `gtk::Overlay`): a green circle (`--badge-ok`, GNOME's
+  its bottom-right corner (a `gtk::Overlay`, `popover::badged`, as keep awake's): a green circle (`--badge-ok`, GNOME's
   `#2ec27e`, fixed, as the theme's success colour may not be green) with a white
   `object-select-symbolic` tick, three eighths of the icon's size plus a ring in the bar's
   tint (`--tint`) as if cut out of the icon (a translucent ring: over the icon's strokes it
@@ -845,7 +857,7 @@ is typed with the VM's keyboard, into whatever has the focus. It checks:
     session: the item is on and filled with the accent (pixels); a click stops the unit
     (`systemctl --user is-active`) and empties the item, another starts it; stopped
     with `systemctl --user stop`, the item follows
-14. keep awake: off at start; on, `systemd-inhibit --list` has its line (idle, "Keep
+14. keep awake: off at start, no green; on, the green tick (pixels), `systemd-inhibit --list` has its line (idle, "Keep
     awake", block) and logind's idle action (`IdleAction=lock` after 5 s, alice's
     session's idle hint set) does not come in 10 s; off, it comes ("System idle" in
     logind's journal) and the inhibitor is gone

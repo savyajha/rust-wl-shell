@@ -119,10 +119,10 @@ window.bar image {
   -gtk-icon-size: var(--icon-size);
 }
 
-/* The VPN's badge while one is on: a green circle with a white tick on the icon's corner
-   (its own colours, not the bar's), ringed in the bar's tint as if cut out of the icon;
-   half the icon's size. */
-window.bar image.vpn-badge {
+/* VPN's and keep awake's badge while on: a green circle with a white tick on the icon's
+   corner (its own colours, not the bar's), ringed in the bar's tint as if cut out of the
+   icon; half the icon's size. */
+window.bar image.tick {
   -gtk-icon-size: calc(var(--icon-size) * 3 / 8);
   padding: calc(var(--icon-size) / 16);
   border-radius: var(--radius-pill);

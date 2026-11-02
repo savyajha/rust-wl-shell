@@ -7,7 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk4::{self as gtk, gdk, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -18,8 +18,13 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::notifications::{Banners, act, close, content, swipe};
 use crate::popover::{self, Switch, title};
 
-/// Its slide in and out.
+/// Its slide in and out: its whole surface moved, by its right margin.
 const SLIDE: Duration = Duration::from_millis(200);
+/// A step of the slide: about a frame.
+const STEP: Duration = Duration::from_millis(8);
+/// Its width less this is past the output's edge when it starts and ends its slide: one
+/// pixel on the output, as niri gives frames only to a surface it shows.
+const OFF: i32 = -1;
 
 pub struct Centre {
     width: i32,
@@ -37,7 +42,8 @@ pub struct Centre {
 
 struct Open {
     window: gtk::Window,
-    revealer: gtk::Revealer,
+    /// Its slide: the latest one started moves it, an earlier one stops.
+    slides: Rc<Cell<u32>>,
     /// The clock that opened it, told (for screen readers) that it is expanded.
     clock: gtk::Button,
     dnd: Switch,
@@ -95,6 +101,9 @@ impl Centre {
             window.set_anchor(edge, true);
             window.set_margin(edge, self.gap);
         }
+        // Mapped past the edge, then slid in.
+        let hidden = -(self.width + OFF);
+        window.set_margin(Edge::Right, hidden);
         window.update_property(&[gtk::accessible::Property::Label("Notification Centre")]);
         let requests = self.requests.clone();
         let dnd = Switch::new("Do Not Disturb", move |on| {
@@ -126,12 +135,7 @@ impl Centre {
         panel.append(&dnd.row);
         panel.append(&header);
         panel.append(&scrolled);
-        let revealer = gtk::Revealer::builder()
-            .transition_type(gtk::RevealerTransitionType::SlideLeft)
-            .transition_duration(SLIDE.as_millis() as u32)
-            .child(&panel)
-            .build();
-        window.set_child(Some(&revealer));
+        window.set_child(Some(&panel));
         let keys = gtk::EventControllerKey::new();
         let centre = Rc::downgrade(self);
         keys.connect_key_pressed(move |_, key, _, _| {
@@ -162,11 +166,12 @@ impl Centre {
             }
         });
         window.present();
-        revealer.set_reveal_child(true);
+        let slides = Rc::new(Cell::new(0));
+        slide(&window, &slides, self.gap);
         clock.update_state(&[gtk::accessible::State::Expanded(Some(true))]);
         self.open.replace(Some(Open {
             window,
-            revealer,
+            slides,
             clock: clock.clone(),
             dnd,
             header,
@@ -183,10 +188,10 @@ impl Centre {
         self.banners.borrow_mut().hide(false);
         open.clock
             .update_state(&[gtk::accessible::State::Expanded(Some(false))]);
-        open.revealer.set_reveal_child(false);
-        // Gone once it has slid out: on a timer, not the revealer's end, which needs
-        // frames an output gone or locked does not draw.
         let window = open.window;
+        slide(&window, &open.slides, -(self.width + OFF));
+        // Gone once it has slid out: on a timer, not the slide's end, which needs frames
+        // an output gone or locked does not draw.
         glib::timeout_add_local_once(SLIDE, move || window.destroy());
     }
 
@@ -250,6 +255,33 @@ impl Centre {
         }
         card
     }
+}
+
+/// Slide `window` (its whole surface, so niri's shadow with it, its contents keeping their
+/// size: no reflow) from its right margin now to `to` over `SLIDE`, easing out, a step
+/// every `STEP` (each margin goes out with the commit gtk4-layer-shell asks GTK for); a
+/// slide it was in stops (`slides` counts them). On a timer rather than the frame clock,
+/// which does not tick for a surface niri has no new frame for.
+fn slide(window: &gtk::Window, slides: &Rc<Cell<u32>>, to: i32) {
+    let (from, start) = (window.margin(Edge::Right), Instant::now());
+    let slide = slides.get() + 1;
+    slides.set(slide);
+    let (window, slides) = (window.downgrade(), slides.clone());
+    glib::timeout_add_local(STEP, move || {
+        let Some(window) = window.upgrade().filter(|_| slides.get() == slide) else {
+            return glib::ControlFlow::Break;
+        };
+        let t = (start.elapsed().as_secs_f64() / SLIDE.as_secs_f64()).min(1.0);
+        let eased = 1.0 - (1.0 - t).powi(3);
+        window.set_margin(
+            Edge::Right,
+            from + ((to - from) as f64 * eased).round() as i32,
+        );
+        match t < 1.0 {
+            true => glib::ControlFlow::Continue,
+            false => glib::ControlFlow::Break,
+        }
+    });
 }
 
 /// A card following a swipe: shifted by its margins, and fading.

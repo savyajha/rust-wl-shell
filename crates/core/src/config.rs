@@ -198,7 +198,7 @@ impl Config {
             (
                 "notification-centre-width",
                 config.notification_centre_width,
-                100..=2000,
+                280..=2000,
             ),
             ("osd-margin", config.osd_margin, 0..=1000),
             ("osd-timeout", config.osd_timeout, 100..=60_000),

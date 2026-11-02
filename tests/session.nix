@@ -99,6 +99,20 @@ let
                         yield from radios(child)
 
             print(json.dumps(list(radios(bar[0]))))
+        elif sys.argv[1:2] == ["--extents"]:
+            # The first node so named: its width and height on screen.
+            def found(node):
+                if node.get_name() == sys.argv[2]:
+                    return node
+                for i in range(node.get_child_count()):
+                    child = node.get_child_at_index(i)
+                    hit = child and found(child)
+                    if hit:
+                        return hit
+                return None
+            node = found(bar[0]).get_component_iface()
+            box = node.get_extents(Atspi.CoordType.WINDOW)
+            print(json.dumps([box.width, box.height]))
         elif sys.argv[1:2] == ["--root-child"]:
             # The shell's root's child at an index, asked on the a11y bus directly (an
             # index past its shown windows, as a client whose count is stale asks).

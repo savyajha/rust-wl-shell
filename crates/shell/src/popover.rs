@@ -182,6 +182,23 @@ impl Circle {
     }
 }
 
+/// `icon` with a green tick on its bottom-right corner (shown with `badge.set_visible`):
+/// VPN's and keep awake's "on", as the bar's faces. The overlay, and the badge.
+pub fn badged(icon: &str) -> (gtk::Overlay, gtk::Image) {
+    let face = gtk::Overlay::builder()
+        .child(&gtk::Image::from_icon_name(icon))
+        .build();
+    let badge = gtk::Image::builder()
+        .icon_name("object-select-symbolic")
+        .css_classes(["tick"])
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::End)
+        .visible(false)
+        .build();
+    face.add_overlay(&badge);
+    (face, badge)
+}
+
 thread_local! {
     /// The item popover open last (one at a time), for `close_open`.
     static OPEN: glib::WeakRef<gtk::Popover> = glib::WeakRef::new();

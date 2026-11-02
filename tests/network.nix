@@ -39,7 +39,7 @@
 #  12. the night light (a stand-in wlsunset unit): on with its unit, its icon the moon
 #      (no fill), struck through when off; a click stops the unit and another starts it;
 #      stopped with systemctl, the item follows
-#  13. keep awake: off at start, an empty cup; on, a steaming one (no fill), logind lists its idle inhibitor (block) and its
+#  13. keep awake: off at start, its cup; on, the same with VPN's green tick (no fill), logind lists its idle inhibitor (block) and its
 #      idle action (lock, 5 s) waits; off, the action comes
 #  14. no GTK warning of widgets moved between windows (the dialog builds its widgets
 #      for each window) in the shell's journal
@@ -634,10 +634,12 @@ pkgs.testers.runNixOSTest {
     with subtest("keep awake holds an idle inhibitor, which logind's idle action waits for"):
         wait_for_tree(has("button", "Keep awake: off"), "keep awake, off at start")
         off = items_look()
+        assert not badge(), "a green tick while off"
         act("Keep awake: off")
         wait_for_tree(has("button", "Keep awake: on"), "keep awake on")
-        # A steaming cup now, not a fill.
-        assert accent_pixels() < 5 and items_look() != off, "the same icon on"
+        # The same cup, with VPN's green tick, not a fill.
+        assert accent_pixels() < 5 and items_look() != off, "the same look on"
+        retry(lambda _: len(badge()) > 10, 10)
         inhibitors = machine.succeed("systemd-inhibit --list --no-pager")
         print(inhibitors)
         line = next(line for line in inhibitors.splitlines() if "rust-wl-shell" in line)
@@ -657,6 +659,7 @@ pkgs.testers.runNixOSTest {
         machine.fail(idled)
         act("Keep awake: on")
         wait_for_tree(has("button", "Keep awake: off"), "keep awake off")
+        retry(lambda _: not badge(), 10)
         machine.wait_until_succeeds(idled, timeout=20)
         assert "rust-wl-shell" not in machine.succeed("systemd-inhibit --list --no-pager")
         typing_reaches_the_window("after-keep-awake")

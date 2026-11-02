@@ -300,6 +300,26 @@ pkgs.testers.runNixOSTest {
         assert has("button", "Mark as read for everyone here")(tree()), tree()
         act("Reply to all of them now")
         machine.wait_until_succeeds("grep -qx reply /tmp/long", timeout=10)
+        # A short label whole, beside a long body (which, wrapping, would take its width):
+        # as wide as beside a short body. Another app's "settings" action shows.
+        def settings_width(body):
+            background(f"notify-send -a Other -A settings=Settings --wait -t 20000 Short '{body}'", "/tmp/short")
+            wait_for_tree(has("button", "Settings"), "its Settings button")
+            width = json.loads(as_user("atspi-tree --extents Settings"))[0]
+            act("Settings")
+            wait_for_tree(lacks("button", "Settings"), "acted on")
+            return width
+        alone = settings_width("hi")
+        beside = settings_width("A long body that wraps over three lines at the least, " * 3)
+        print(f"Settings: {alone} px beside a short body, {beside} beside a long one")
+        assert beside == alone, (alone, beside)
+        # Chromium's own "settings", from a Chromium-based browser: left out.
+        hint = "-h string:desktop-entry:brave-browser"
+        background(f"notify-send -a Brave {hint} -A settings=Settings -A reply=Reply --wait -t 20000 Site body", "/tmp/site")
+        wait_for_tree(has("button", "Reply"), "the site's banner")
+        assert lacks("button", "Settings")(tree()), "Chromium's Settings shown"
+        act("Reply")
+        machine.wait_until_succeeds("grep -qx reply /tmp/site", timeout=10)
         # The history's cards show no actions.
         background("notify-send -a Chat -p -A keep=Keep --wait -t 20000 Kept body", "/tmp/kept")
         wait_for_tree(has("button", "Keep"), "its button")

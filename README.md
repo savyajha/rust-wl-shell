@@ -121,8 +121,8 @@ speaker mutes) and the outputs (each sound card's available ports) to choose fro
 brightness's slider; the layouts to choose from. A click outside or Escape closes it.
 The brightness is set through logind, which needs no permission. The night light and
 keep awake are click toggles with no popover, their icons telling their state (the moon,
-struck through when off; a cup, steaming when on). While a VPN is on, its icon has a
-green tick on its corner (`--badge-ok`). While Do Not Disturb
+struck through when off; the cup, with a green tick on its corner while on). While a VPN
+is on, its icon has the same green tick (`--badge-ok`). While Do Not Disturb
 is on, its icon shows beside the clock. The night
 light starts and stops a user unit (wlsunset by default), whose state it shows, so
 `systemctl --user stop wlsunset` turns it off too; off stays off until it is turned on

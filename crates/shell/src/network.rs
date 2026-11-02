@@ -10,7 +10,7 @@ use shell_core::network::{
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::dialog::Dialog;
-use crate::popover::{Circle, Item, Row, Switch, title};
+use crate::popover::{Circle, Item, Row, Switch, badged, title};
 
 /// The primary connection's icon; its popover has the Wi-Fi switch, a wired connection
 /// when there is one, the known networks in range, and the others under "Other Networks".
@@ -216,17 +216,7 @@ pub struct VpnItem {
 
 impl VpnItem {
     pub fn new(requests: UnboundedSender<Request>) -> Self {
-        let face = gtk::Overlay::builder()
-            .child(&gtk::Image::from_icon_name("network-vpn-symbolic"))
-            .build();
-        let badge = gtk::Image::builder()
-            .icon_name("object-select-symbolic")
-            .css_classes(["vpn-badge"])
-            .halign(gtk::Align::End)
-            .valign(gtk::Align::End)
-            .visible(false)
-            .build();
-        face.add_overlay(&badge);
+        let (face, badge) = badged("network-vpn-symbolic");
         let item = Item::new(&face, "VPN");
         let title = title("VPN");
         let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
