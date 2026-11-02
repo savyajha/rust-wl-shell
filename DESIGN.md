@@ -500,6 +500,15 @@ pointer's enter (seen in nested niri); an enter in the banner's first 500 ms is 
 showing under a still pointer, which leaves the popover open (but a banner moved under it
 as the stack shifts, older than that, still closes it). A popover stays open over niri's overview.
 
+Every popover is laid out on one grid, all `--space-*`: the contents' padding (`--space-m`
+top and bottom, `--space-s` at the sides) and each row's (`--space-xs` `--space-s`) put
+the row icons' left edge twice `--space-s` in; titles, section titles, notes ("No
+devices") and the "Other Networks" disclosure's arrow start there too, and only what
+follows a row's icon (its label, the disclosure's) starts after it. A section has
+`--space-m` above its title and `--space-xs` below; a note is dim and as tall as a row
+(`--circle-size` and a row's padding), and so is the disclosure's title, its arrow in a
+column as wide as the row icons and its label in the labels'.
+
 Every item's popover is one width, `--popover-width` (320 px, its contents' `min-width`),
 whatever it lists: the rows' labels and the titles ellipsize, with a natural width of one
 character (`max-width-chars`), so a long network name never widens it; the Wi-Fi list's

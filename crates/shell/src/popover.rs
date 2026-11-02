@@ -323,7 +323,7 @@ pub fn section(text: &str) -> (gtk::Box, gtk::Box, gtk::Label) {
         .wrap(true)
         .max_width_chars(1)
         .build();
-    note.add_css_class("line");
+    note.add_css_class("note");
     section.append(&title(text));
     section.append(&rows);
     section.append(&note);

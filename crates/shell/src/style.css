@@ -186,7 +186,12 @@ window.bar .face {
 /* A popover: as GNOME apps' menus (adwaita.css: opaque, in the theme's popover colours,
    rounded at `popover-radius`, its rows, switches and sliders libadwaita's), a gap from
    the bar (`popover-gap`), its button keeping its plate while it is open (`:checked`),
-   as macOS's. Here, its layout. */
+   as macOS's. Here, its layout, on one grid: the contents' padding, then each row's
+   (`--space-xs` `--space-s`), puts the row icons' left edge `--space-s` twice in; titles,
+   section titles, notes and the "Other Networks" disclosure's arrow start there too, and
+   only what follows a row's icon (its label, the disclosure's) starts after it. Notes and
+   the disclosure are as tall as a row; a section has `--space-m` above its title and
+   `--space-xs` below. */
 popover.item-popover > contents {
   padding: var(--space-m) var(--space-s);
   min-width: var(--popover-width);
@@ -292,6 +297,26 @@ popover.item-popover .section {
   margin-top: var(--space-m);
 }
 
+/* A section's note ("No devices"): dim, where a row would be, its text where the titles'
+   is. */
+popover.item-popover .note {
+  opacity: var(--dim);
+  min-height: var(--circle-size);
+  padding: var(--space-xs) var(--space-s);
+}
+
+/* The disclosure ("Other Networks") as a row: its arrow in the row icons' column, its
+   label in their labels'. */
+popover.item-popover expander-widget > box > title {
+  min-height: var(--circle-size);
+  padding: var(--space-xs) var(--space-s);
+}
+
+popover.item-popover expander-widget > box > title > expander {
+  min-width: var(--circle-size);
+  margin-right: var(--space-m);
+}
+
 /* A popover's title with a switch, and what follows a row's label (a lock, a level). */
 popover.item-popover .switch-row {
   margin: 0 var(--space-s) var(--space-xs);
@@ -305,9 +330,6 @@ popover.item-popover .after {
   opacity: var(--dim);
 }
 
-popover.item-popover expander {
-  margin: 0 var(--space-s);
-}
 
 /* A notification's banner, as macOS's: an opaque card (its window no more than it), its
    app's icon (or its image, the icon a badge on it) on the left, the summary in bold, the
