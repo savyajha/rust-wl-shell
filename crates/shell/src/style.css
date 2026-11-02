@@ -1,8 +1,7 @@
 /* The shell's look. Every value is a variable, defined once here; a user's stylesheet,
    $XDG_CONFIG_HOME/rust-wl-shell/style.css, overrides them in its own `window { }` rule
    (README). The config's sizes come before this file as variables too: --height,
-   --font-size, --icon-size, --spacing, --popover-radius and --panel-radius; and the ×'s
-   size, --close-size, which the banners' layout follows (notifications.rs). */
+   --font-size, --icon-size, --spacing, --popover-radius and --panel-radius. */
 
 /* The named colours used here (the accent, the dialog's) are the GTK theme's, a gtk.css's
    (matugen's, for one) over it, else fallback.css's. */
@@ -13,7 +12,6 @@ window {
   --accent-fg: @accent_fg_color;
   --fg: white;
   --tint: rgba(0, 0, 0, 0.35);
-  --close-bg: rgba(60, 60, 60, 0.9);
   --outline: rgba(255, 255, 255, 0.2);
   --hover: rgba(255, 255, 255, 0.2);
   --card: rgba(255, 255, 255, 0.08);
@@ -70,6 +68,20 @@ window {
   /* The popovers, as libadwaita's: opaque, in the theme's popover colours. */
   --popover-bg: @popover_bg_color;
   --popover-fg: @popover_fg_color;
+
+  /* A notification's ×: a square in the theme's red (its destructive colours), rounded as
+     niri's windows are (0: sharp), in its card's top-right corner, within the card's
+     padding and `--close-inset` more; the text keeps `--close-gap` from it. Hovered, its
+     red moves towards its glyph's colour. */
+  --close-size: 20px;
+  --close-icon-size: 12px;
+  --close-radius: 6px;
+  --close-inset: 0px;
+  --close-gap: var(--space-s);
+  --close-bg: @destructive_bg_color;
+  --close-fg: @destructive_fg_color;
+  --close-bg-hover: mix(var(--close-bg), var(--close-fg), 0.15);
+  --close-outline: transparent;
 
   /* The banners, as the popovers: opaque, in the theme's popover colours, outlined as
      libadwaita's popovers are. */
@@ -291,15 +303,15 @@ popover.item-popover expander {
   margin: 0 var(--space-s);
 }
 
-/* A notification's banner, as macOS's: an opaque card (the window around it clear, room
-   for the × on its top-right corner), its app's icon (or its image, the icon a badge on
-   it) on the left, the summary in bold, the body, its action (or "Options") on the right;
-   × while hovered. In the clock's popover, its rows, with the time after the summary. */
+/* A notification's banner, as macOS's: an opaque card (its window no more than it), its
+   app's icon (or its image, the icon a badge on it) on the left, the summary in bold, the
+   body, its action (or "Options") on the right; × in its top-right corner while hovered.
+   In the clock's popover, its rows, with the time after the summary. */
 window.notification {
   background: none;
 }
 
-.banner > .card {
+window.notification > .card {
   background-color: var(--banner-bg);
   color: var(--banner-fg);
   border: var(--outline-width) solid var(--banner-outline);
@@ -309,6 +321,7 @@ window.notification {
 
 .card .main {
   border-spacing: var(--space-l);
+  margin-right: calc(var(--close-size) + var(--close-inset) + var(--close-gap));
 }
 
 .card .text {
@@ -334,22 +347,26 @@ window.notification {
   margin-left: var(--space-s);
 }
 
-.card button.close,
-.banner > button.close {
+.card > button.close {
   all: unset;
   min-width: var(--close-size);
   min-height: var(--close-size);
-  border-radius: var(--radius-pill);
+  margin: var(--close-inset);
+  border-radius: var(--close-radius);
   background-color: var(--close-bg);
-  box-shadow: inset 0 0 0 var(--outline-width) var(--outline);
-  -gtk-icon-size: 12px;
+  color: var(--close-fg);
+  box-shadow: inset 0 0 0 var(--outline-width) var(--close-outline);
+  -gtk-icon-size: var(--close-icon-size);
   opacity: 0;
-  transition: opacity var(--transition);
+  transition: opacity var(--transition), background-color var(--transition);
 }
 
-.card:hover button.close,
-.banner:hover > button.close {
+.card:hover > button.close {
   opacity: 1;
+}
+
+.card > button.close:hover {
+  background-color: var(--close-bg-hover);
 }
 
 popover.item-popover button.clear {

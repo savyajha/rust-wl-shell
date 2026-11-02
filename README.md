@@ -152,7 +152,7 @@ three, newest nearest the corner, each for its app's timeout or 5 s (paused whil
 pointer is over it); one that asks never to expire still leaves after
 `notification-max-timeout`, unless it is critical. Banners are opaque, in the theme's
 popover colours (`--banner-bg`, `--banner-fg`), with no blur. A click runs its default
-action, its buttons their actions, × (on its top-right corner while hovered) or a swipe
+action, its buttons their actions, × (in its top-right corner while hovered) or a swipe
 sideways (a drag, or two fingers on a touchpad)
 dismisses it. The clock opens the history, grouped by app, with × and "Clear all", and a
 Do Not Disturb switch (no banners but critical ones); both are kept in
@@ -187,9 +187,8 @@ A file GTK cannot parse in full is left out, its errors logged, and the built-in
 stays; one with only warnings (an empty declaration, `;;`) is applied, its warnings
 logged. The accent defaults to GTK's (`@accent_bg_color`, which a gtk.css can set).
 
-Do not override `--radius-pill` or `--close-size` in the stylesheet: the OSD's blur is a
-pill whatever the CSS says, and the banners' room for their × follows the shell's own
-size. Set the banners' radius with the config's `panel-radius`.
+Do not override `--radius-pill` in the stylesheet: the OSD's blur is a pill whatever the
+CSS says. Set the banners' radius with the config's `panel-radius`.
 
 The shell watches the name `style.css` in its directory: it sees the file written,
 replaced, or renamed over (home-manager's symlink), but not an edit to the file a

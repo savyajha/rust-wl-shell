@@ -291,15 +291,18 @@ In the UI (`notifications.rs`, `clock.rs`):
   it is, if it does not parse), three lines at most; no app name. One action other than
   `default` is a button on the right; more are "Options", a menu button whose popover
   (the bar's popovers' look) lists them, below the banner at the button's right edge, taking the keyboard while open
-  (`OnDemand`, as the bar's popovers; Escape closes it). × is round (`CLOSE_SIZE`, 20 px,
-  the stylesheet's `--close-size` set from it), centred on the card's top-right corner,
-  overhanging it: the window has a clear margin of half its size above the card and to its
-  right (less from the edge's gap, never past the output's edge, so with the default gap
-  the card is 10 px from the edge rather than 8), and takes input only on the card and
-  the × (its input region, set on each layout). It shows while the pointer is over the
-  banner (CSS `:hover`; always in the tree, for screen readers, named
-  `Dismiss "summary"`). The history's rows use the same card, without actions, its × over
-  its top-left corner, with the time after the summary, muted ("now", "5m",
+  (`OnDemand`, as the bar's popovers; Escape closes it). × is a square in the theme's
+  red (`@destructive_bg_color`, its glyph `@destructive_fg_color`; libadwaita's in
+  `fallback.css`), rounded at 6 px as niri's windows, in the card's top-right corner,
+  inside it (an overlay of the card, so within its padding), the card's text and buttons
+  keeping its width and a gap clear of it; hovered, its red mixed 15 % towards the
+  glyph's colour. Its size, radius, inset, colours and hover are the stylesheet's
+  (`--close-size`, `--close-icon-size`, `--close-radius`, `--close-inset`, `--close-gap`,
+  `--close-bg`, `--close-fg`, `--close-bg-hover`, `--close-outline`). The window is the
+  card alone. × shows while the pointer is over the card (CSS `:hover`; always in the
+  tree, for screen readers, named `Dismiss "summary"`, else after the app, else
+  `Dismiss`). The history's rows use the same card, without actions, its × in the same
+  corner, with the time after the summary, muted ("now", "5m",
   "2h"; refreshed each time the popover shows). Its countdown (`Countdown`) pauses while the pointer
   is over it, or its menu is open (resumed when it closes only if the pointer has left); destroyed with its window still pending (its output gone), the banner
   expires: a replaced notification's banner is built again, with its whole time. While
@@ -586,7 +589,7 @@ round icons as circular buttons, switches and sliders libadwaita's. A box's
 spacing is CSS too: its `border-spacing`, which GTK's box layout adds to its (zero)
 `spacing`. Before it, `style.rs` puts one generated `window { }` rule with what the
 config sets: `--height`, `--font-size`, `--icon-size`, `--spacing`, `--popover-radius`
-and `--panel-radius`, then `--close-size` (the banners' layout follows it). The banners'
+and `--panel-radius`. The banners'
 and the popovers' radii, which once had blur following them, stay config keys; the bar's height feeds its exclusive zone; layer-shell margins,
 the pills' animated sizes and the timings are the config's for the same reason, CSS not
 reaching them. The font family is the system's (`gtk-font-name`).

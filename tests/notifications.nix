@@ -15,8 +15,9 @@
 #   5. an app's CloseNotification removes the banner and the history entry (closed, 3)
 #   6. a click runs the default action, with an ActivationToken first; a button its
 #      action; with three, "Options" opens a menu of them, one of which reaches the app;
-#      all close the notification; x shows centred on a banner's top-right corner while
-#      hovered, and dismisses it (closed, 2), as does its x named after the summary, through AT-SPI;
+#      all close the notification; x shows in a banner's top-right corner, inside it (inset
+#      by its padding), while hovered, and dismisses it (closed, 2), as does its x named
+#      after the summary (or the app, with none), through AT-SPI;
 #      the Options menu takes the keyboard: Escape closes it, and typing reaches the
 #      window again
 #   7. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2)
@@ -133,9 +134,8 @@ pkgs.testers.runNixOSTest {
         move(100, 700)
         time.sleep(0.5)
         shot = screen()
-        # The card: 10 px from the right edge and below the bar (the gap, 8, is less than
-        # half the x over its corner), 360 wide.
-        left, top = 1024 - 10 - 360, HEIGHT + 10
+        # The card: 8 px (the gap) from the right edge and below the bar, 360 wide.
+        left, top = 1024 - 8 - 360, HEIGHT + 8
         # The icon's slot, on the left (40 px, after the padding): the theme's mail icon.
         slot = [pixel(shot, x, y) for x in range(left + 14, left + 52) for y in range(HEIGHT + 20, HEIGHT + 58)]
         assert any(min(p) > 150 for p in slot), "no icon in its slot"
@@ -275,12 +275,12 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(banner_gone("Menu"), "closed once acted on")
         retry(lambda _: keyboard_free(), 10)
 
-    with subtest("x shows on a banner's top-right corner while hovered, and dismisses it"):
+    with subtest("x shows in a banner's top-right corner while hovered, and dismisses it"):
         nid = as_user(NOTIFY + "-p -t 20000 Hovered body").strip()
         wait_for_tree(banner_shown("Hovered"), "the banner")
-        # The card's top-right corner, and around it.
-        cx, cy = 1024 - 10, HEIGHT + 10
-        corner = [(x, y) for x in range(cx - 14, 1024) for y in range(cy - 10, cy + 14)]
+        # The card's top-right corner (it ends 8 px from the edge, below the bar).
+        right, top = 1024 - 8, HEIGHT + 8
+        corner = [(x, y) for x in range(right - 60, 1024) for y in range(top - 4, top + 50)]
         move(100, 700)
         time.sleep(0.5)
         away = screen()
@@ -289,13 +289,15 @@ pkgs.testers.runNixOSTest {
         over = screen()
         changed = [(x, y) for x, y in corner if pixel(away, x, y) != pixel(over, x, y)]
         assert len(changed) > 20, "no x on hover"
-        # Centred on the corner: the middle of the changed pixels (20 px across).
+        # Inside the card, inset by its border (1 px) and padding (10 px, 12 px): 20 px
+        # across.
         xs, ys = [x for x, _ in changed], [y for _, y in changed]
-        middle = ((min(xs) + max(xs) + 1) / 2, (min(ys) + max(ys) + 1) / 2)
         print(f"x from {min(xs)},{min(ys)} to {max(xs)},{max(ys)}")
-        assert abs(middle[0] - cx) <= 1 and abs(middle[1] - cy) <= 1, middle
+        assert abs(max(xs) - (right - 1 - 12 - 1)) <= 1, xs
+        assert abs(min(ys) - (top + 1 + 10)) <= 1, ys
+        assert 18 <= max(xs) - min(xs) <= 21 and 18 <= max(ys) - min(ys) <= 21, (xs, ys)
         # A click on it.
-        click(cx, cy)
+        click((min(xs) + max(xs)) // 2, (min(ys) + max(ys)) // 2)
         wait_for_tree(banner_gone("Hovered"), "dismissed by its x")
         assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
         move(100, 700)
@@ -305,6 +307,15 @@ pkgs.testers.runNixOSTest {
         act('Dismiss "Named"')
         wait_for_tree(banner_gone("Named"), "dismissed through AT-SPI")
         assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
+        # With no summary, after its app.
+        as_user(
+            "gdbus call --session --dest org.freedesktop.Notifications "
+            + "--object-path /org/freedesktop/Notifications "
+            + "--method org.freedesktop.Notifications.Notify Unnamed 0 \"\" \"\" body '[]' '{}' 20000"
+        )
+        wait_for_tree(has("button", 'Dismiss "Unnamed"'), "its x, after the app")
+        act('Dismiss "Unnamed"')
+        wait_for_tree(lacks("button", 'Dismiss "Unnamed"'), "dismissed")
 
     with subtest("a swipe dismisses: a drag, and a horizontal scroll"):
         nid = as_user(NOTIFY + "-p -t 20000 Dragged body").strip()

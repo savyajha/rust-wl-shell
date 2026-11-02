@@ -378,14 +378,14 @@ pkgs.testers.runNixOSTest {
         time.sleep(1.5)
         assert has("switch", "Wi-Fi")(tree()), "closed by a banner under a still pointer"
         # The pointer off the banner (still over the popover) and back onto it: the popover
-        # closes; then a click on its x, at the card's corner.
+        # closes; then a click on its x, in the card's top-right corner.
         move(1024 - 10 - 90, HEIGHT + 200)
         time.sleep(0.5)
         move(1024 - 10 - 90, HEIGHT + 44)
         wait_for_tree(lacks("switch", "Wi-Fi"), "the popover closed")
-        move(1024 - 10, HEIGHT + 10)
+        move(1024 - 8 - 23, HEIGHT + 8 + 21)
         time.sleep(0.5)
-        click(1024 - 10, HEIGHT + 10)
+        click(1024 - 8 - 23, HEIGHT + 8 + 21)
         wait_for_tree(lacks("label", "Over"), "the banner dismissed by its x")
         move(100, 700)
         typing_reaches_the_window("after-banner")

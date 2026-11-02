@@ -7,7 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gtk4::{self as gtk, cairo, gdk, gio, glib, pango, prelude::*};
+use gtk4::{self as gtk, gdk, gio, glib, pango, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use shell_core::config::{Config, Corner};
 use shell_core::notifications::{Notification, Notifications, Request};
@@ -17,9 +17,6 @@ use tokio::sync::mpsc::UnboundedSender;
 const MENU_GAP: i32 = 6;
 /// A banner's first moments: the pointer entering it then was there when it showed.
 const SETTLED: Duration = Duration::from_millis(500);
-/// The ×'s size (the stylesheet's `--close-size`, set from here): a banner's window has
-/// half of it around its card's top and right, for its × centred on the card's corner.
-pub const CLOSE_SIZE: i32 = 20;
 
 /// A banner's pending timeout, if it has one.
 type Timer = Rc<RefCell<Option<glib::SourceId>>>;
@@ -123,24 +120,21 @@ impl Banners {
         self.stack();
     }
 
-    /// The banners shown stacked from the corner, their cards a gap apart (and from the
-    /// edge: less the room for the × above each card, as far as the edge lets it).
+    /// The banners shown stacked from the corner, a gap apart.
     fn stack(&self) {
-        let (vertical, mut offset) = match self.corner {
-            Corner::TopLeft | Corner::Top | Corner::TopRight => {
-                (Edge::Top, (self.gap - CLOSE_SIZE / 2).max(0))
-            }
-            _ => (Edge::Bottom, self.gap),
+        let vertical = match self.corner {
+            Corner::TopLeft | Corner::Top | Corner::TopRight => Edge::Top,
+            _ => Edge::Bottom,
         };
-        let width = self.width + CLOSE_SIZE / 2;
+        let mut offset = self.gap;
         for window in self
             .shown
             .iter()
             .filter_map(|(_, window, _)| window.as_ref())
         {
             window.set_margin(vertical, offset);
-            let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, width);
-            offset += height + self.gap - CLOSE_SIZE / 2;
+            let (_, height, _, _) = window.measure(gtk::Orientation::Vertical, self.width);
+            offset += height + self.gap;
         }
     }
 
@@ -152,7 +146,7 @@ impl Banners {
     ) -> gtk::Window {
         let window = gtk::Window::builder()
             .css_classes(["notification"])
-            .default_width(self.width + CLOSE_SIZE / 2)
+            .default_width(self.width)
             .build();
         window.init_layer_shell();
         window.set_namespace(Some("rust-wl-shell-notification"));
@@ -168,14 +162,9 @@ impl Banners {
             Corner::BottomRight => (Edge::Bottom, Some(Edge::Right)),
         };
         window.set_anchor(vertical, true);
-        // From the edge: the card a gap away, the × beside it as far as the edge lets it.
-        let margin = match horizontal {
-            Some(Edge::Right) => (self.gap - CLOSE_SIZE / 2).max(0),
-            _ => self.gap,
-        };
         if let Some(edge) = horizontal {
             window.set_anchor(edge, true);
-            window.set_margin(edge, margin);
+            window.set_margin(edge, self.gap);
         }
         let requests = self.requests.clone();
         let id = n.id;
@@ -242,18 +231,8 @@ impl Banners {
             let closed = window.clone();
             menu.connect_closed(move |_| closed.set_keyboard_mode(KeyboardMode::None));
         }
-        // The × centred on the card's top-right corner, over the window's margin there.
-        let frame = gtk::Overlay::builder()
-            .child(&card)
-            .css_classes(["banner"])
-            .build();
-        let close = close(n, requests.clone());
-        close.set_halign(gtk::Align::End);
-        frame.add_overlay(&close);
-        card.set_margin_top(CLOSE_SIZE / 2);
-        card.set_margin_end(CLOSE_SIZE / 2);
-        window.set_child(Some(&frame));
-        input_region(&window, &card, &close);
+        card.add_overlay(&close(n, requests.clone()));
+        window.set_child(Some(&card));
         // GTK closes an open popover on a click outside it, and keeps the click: closed
         // first, by the pointer coming onto the banner, the click (on ×) reaches it. While
         // the popover holds its grab, the banner gets no motion, only the pointer's enter:
@@ -265,17 +244,17 @@ impl Banners {
                 crate::popover::close_open();
             }
         });
-        frame.add_controller(hover);
+        card.add_controller(hover);
         // The banner follows a swipe sideways, as far as its anchored edge lets it.
-        let swiped = self.swipe;
+        let (gap, swiped) = (self.gap, self.swipe);
         let moved = glib::clone!(
             #[weak]
             window,
             move |dx: f64| {
                 window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(0.8));
                 match horizontal {
-                    Some(Edge::Right) => window.set_margin(Edge::Right, margin - dx as i32),
-                    Some(edge) => window.set_margin(edge, margin + dx as i32),
+                    Some(Edge::Right) => window.set_margin(Edge::Right, gap - dx as i32),
+                    Some(edge) => window.set_margin(edge, gap + dx as i32),
                     None => {}
                 }
             }
@@ -295,7 +274,7 @@ impl Banners {
             card.add_controller(click);
         }
         if let Some(countdown) = countdown {
-            countdown.follow(&frame, &window, menu.as_ref());
+            countdown.follow(&card, &window, menu.as_ref());
         }
         window.set_visible(true);
         window
@@ -326,7 +305,7 @@ impl Countdown {
         *self.timer.borrow_mut() = Some(source);
     }
 
-    /// The clock stopped while the pointer is over `card` (or its ×), or its `menu` is open. Destroyed
+    /// The clock stopped while the pointer is over `card`, or its `menu` is open. Destroyed
     /// with `window` still pending (not by `Banners`, which takes it first: its output
     /// gone), the banner is expired at once.
     fn follow(&self, card: &gtk::Overlay, window: &gtk::Window, menu: Option<&gtk::Popover>) {
@@ -393,7 +372,8 @@ pub fn act(
 /// A notification's card, as macOS's: its app's icon (full colour, from its desktop file,
 /// else the icon it sent), or its image with the app's icon as a badge on it; the summary,
 /// with the time after it in the history (`times`, to refresh), the body (three lines at
-/// most); `side` (its actions) on the right. An overlay, for its × (`close`).
+/// most); `side` (its actions) on the right, the room for its × (`close`) kept after them.
+/// An overlay, for its ×.
 pub fn content(
     n: &Notification,
     side: Option<&gtk::Widget>,
@@ -477,46 +457,26 @@ pub fn content(
         .build()
 }
 
-/// A notification's ×, which dismisses it, shown while the pointer is over its card (at the
-/// top left, unless moved); named after the summary for screen readers.
+/// A notification's ×, which dismisses it: in its card's top-right corner, within its
+/// padding, shown while the pointer is over the card; named after the summary (else its app)
+/// for screen readers.
 pub fn close(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Button {
     let close = gtk::Button::builder()
         .icon_name("window-close-symbolic")
         .css_classes(["close"])
-        .halign(gtk::Align::Start)
+        .halign(gtk::Align::End)
         .valign(gtk::Align::Start)
         .build();
     let id = n.id;
-    let name = format!("Dismiss \"{}\"", n.summary);
+    let name = [&n.summary, &n.app]
+        .into_iter()
+        .find(|name| !name.trim().is_empty())
+        .map_or("Dismiss".into(), |name| format!("Dismiss \"{name}\""));
     close.update_property(&[gtk::accessible::Property::Label(&name)]);
     close.connect_clicked(move |_| {
         let _ = requests.send(Request::Dismiss(id));
     });
     close
-}
-
-/// A banner's window takes the pointer only on its `card` and its `close`, not on the
-/// margin around them (the shell's own windows have none of GTK's shapes to keep).
-fn input_region(window: &gtk::Window, card: &gtk::Overlay, close: &gtk::Button) {
-    let (card, close) = (card.clone(), close.clone());
-    window.connect_realize(move |window| {
-        let (window, card, close) = (window.clone(), card.clone(), close.clone());
-        let Some(surface) = window.surface() else {
-            return;
-        };
-        // After GTK's own handler: the widgets laid out for the size.
-        surface.connect_layout(move |surface, _, _| {
-            let rectangles: Vec<_> = [card.upcast_ref::<gtk::Widget>(), close.upcast_ref()]
-                .iter()
-                .filter_map(|w| w.compute_bounds(&window))
-                .map(|b| {
-                    let (x, y) = (b.x() as i32, b.y() as i32);
-                    cairo::RectangleInt::new(x, y, b.width() as i32, b.height() as i32)
-                })
-                .collect();
-            surface.set_input_region(Some(&cairo::Region::create_rectangles(&rectangles)));
-        });
-    });
 }
 
 /// The app's icon: its desktop file's (`desktop-entry`), else the one it sent (a name, a
