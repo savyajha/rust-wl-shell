@@ -90,8 +90,8 @@ pub struct Notifications {
 pub enum Request {
     /// A banner's time is up.
     Expired(u32),
-    /// Dismissed: × or a swipe, on a banner or in the history.
-    Dismiss(u32),
+    /// Dismissed: × or a swipe, on a banner or in the history (an app's stack at once).
+    Dismiss(Vec<u32>),
     /// An action (the "default" one for a click), with the activation token for the app.
     Action {
         id: u32,
@@ -382,7 +382,10 @@ pub async fn run(
                     debug!("notification {id}: its banner's time is up");
                     store.expire(id).into_iter().collect()
                 }
-                Request::Dismiss(id) => store.close(id, Reason::Dismissed),
+                Request::Dismiss(ids) => ids
+                    .into_iter()
+                    .flat_map(|id| store.close(id, Reason::Dismissed))
+                    .collect(),
                 Request::ClearAll => store.clear(),
                 Request::Dnd(on) => {
                     store.state.dnd = on;

@@ -32,8 +32,8 @@
 #   9. x shows at the end of a banner's summary line (its top-right, inset by its padding), while
 #      hovered, and dismisses it (closed, 2), as does its x named after the summary (or
 #      the app, with none), through AT-SPI
-#  10. a swipe towards its edge dismisses a banner: a drag, and a horizontal scroll
-#      (closed, 2); one short of the distance goes back (a wheel's, though it sends no
+#  10. a swipe towards its edge dismisses a banner: a drag (its default action not run),
+#      and a horizontal scroll (closed, 2); one short of the distance goes back (a wheel's, though it sends no
 #      end and the banner slid from under the pointer; a slow drag's), unless flung
 #      (closed, 2); one inwards goes back, however far (a scroll) or fast (a flick)
 #  11. the Notification Centre: a solid panel down the output's right, below the bar,
@@ -41,6 +41,10 @@
 #      stays open; a click on the desktop or on a window closes it, as do Escape (and it
 #      opens again at once after) and the clock again (which does not open it anew);
 #      typing reaches the window after each
+#  11b. the Centre stacks an app's two or more: collapsed, its newest only (over peeks),
+#      a click expanding it, "Show less" collapsing it; expanded over a change; its
+#      newest's x dismisses that one; a swipe on the collapsed stack dismisses them all,
+#      as does an expanded one's x (closed, 2 each); one app's one card as before
 #  12. Do Not Disturb: its indicator beside the clock only while on; no banners (but
 #      critical ones), the history still fills; a transient one closed after its id is
 #      sent (notify-send --wait returns); it and the history survive a restart of the
@@ -97,9 +101,13 @@ pkgs.testers.runNixOSTest {
         return machine.succeed("cat /tmp/signals")
 
     def history():
-        """The Notification Centre open: its labels."""
+        """The Notification Centre open, its stacks expanded: its labels."""
         act("Clock", "button")
         wait_for_tree(has("switch", "Do Not Disturb"), "the Notification Centre")
+        for r, n in tree():
+            if r == "button" and n.endswith(" notifications, expand"):
+                act(n, "button")
+                wait_for_tree(has("button", n.split(",")[0] + ", show less"), "expanded")
         return [n for r, n in tree() if r == "label"]
 
     def close_history():
@@ -422,8 +430,10 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(lacks("button", 'Dismiss "Unnamed"'), "dismissed")
 
     with subtest("a swipe dismisses: a drag, and a horizontal scroll"):
-        nid = as_user(NOTIFY + "-p -t 20000 Dragged body").strip()
+        # With a default action, which the drag's release does not run.
+        background("notify-send -a Mail -p -A default=Open --wait -t 20000 Dragged body", "/tmp/dragged")
         wait_for_tree(banner_shown("Dragged"), "the banner")
+        nid = machine.succeed("head -1 /tmp/dragged").strip()
         y = HEIGHT + 8 + 40
         # A drag to the right, kept as a screen halfway.
         x = 1024 - 8 - 300
@@ -438,6 +448,8 @@ pkgs.testers.runNixOSTest {
         input_events({"type": "btn", "data": {"down": False, "button": "left"}})
         wait_for_tree(banner_gone("Dragged"), "swiped by a drag")
         assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
+        assert not re.search(rf"ActionInvoked\s+uint32 {nid}\s", signals()), signals()
+        assert "default" not in machine.succeed("cat /tmp/dragged")
         assert "Dragged" not in history()
         close_history()
         as_user(NOTIFY + "-t 20000 Scrolled body")
@@ -582,6 +594,82 @@ pkgs.testers.runNixOSTest {
         closed("closed by the clock")
         as_user(CALL + f"CloseNotification u {nid}")
         as_user(CALL + f"CloseNotification u {later}")
+
+    with subtest("the Centre stacks an app's notifications, a click expanding them"):
+        b = as_user("notify-send -a Beta -p -t 1 B1 body").strip()
+        alpha = [as_user(f"notify-send -a Alpha -p -t 1 A{i} body").strip() for i in (1, 2, 3)]
+        wait_for_tree(banner_gone("A3"), "all in the history")
+        act("Clock", "button")
+        wait_for_tree(has("switch", "Do Not Disturb"), "the Notification Centre")
+        expand, less = "Alpha, 3 notifications, expand", "Alpha, show less"
+
+        def collapsed(t):
+            return has("button", expand)(t) and lacks("button", less)(t) and has("label", "A3")(t) and lacks("label", "A2")(t) and lacks("label", "A1")(t)
+
+        def expanded(t):
+            return has("button", less)(t) and lacks("button", expand)(t) and all(has("label", f"A{i}")(t) for i in (1, 2, 3))
+
+        # Collapsed: its newest only (over peeks); Beta's one card as it was.
+        wait_for_tree(collapsed, "Alpha collapsed")
+        assert has("label", "B1")(tree()) and lacks("button", "Beta, 1 notifications, expand")(tree())
+        move(100, 700)
+        time.sleep(0.5)
+        machine.send_monitor_command(f"screendump {machine.out_dir}/stacks-collapsed.ppm gpu 0")
+        # Its newest card on screen, over its peeks (strips between the cards' colour and
+        # the panel's): the first peeks down the panel's middle are Alpha's (its group the
+        # first).
+        x = 1024 - 8 - 190
+        shot = screen()
+        def is_peek(y):
+            return all(58 <= pixel(shot, x, y + i)[0] <= 66 for i in (0, 1))
+        peek = next(y for y in range(HEIGHT, 768) if is_peek(y))
+        assert is_popover(pixel(shot, x, peek + 14)), "more than two peeks"
+        spot = (x, peek - 20)
+        # A click on it expands it (its default action not run: it has none, and the Centre
+        # stays open); "Show less" collapses it again.
+        click(*spot)
+        wait_for_tree(expanded, "Alpha expanded by a click")
+        # One button, "+2" then "Show less": named for each, and expanded.
+        assert json.loads(as_user(f"atspi-tree --expanded '{less}'")), "not expanded"
+        assert has("switch", "Do Not Disturb")(tree()), "the Centre closed"
+        move(100, 700)
+        time.sleep(0.5)
+        machine.send_monitor_command(f"screendump {machine.out_dir}/stacks-expanded.ppm gpu 0")
+        act(less, "button")
+        wait_for_tree(collapsed, "Alpha collapsed by Show less")
+        assert not json.loads(as_user(f"atspi-tree --expanded '{expand}'")), "expanded"
+        # Expanded again by its button, it stays so over a change (Beta's dismissed by its ×).
+        act(expand, "button")
+        wait_for_tree(expanded, "Alpha expanded by its button")
+        act('Dismiss "B1"', "button")
+        wait_for_tree(lambda t: lacks("label", "B1")(t) and expanded(t), "B1 dismissed, Alpha still expanded")
+        assert re.search(rf"NotificationClosed\s+uint32 {b}\s+uint32 2", signals()), signals()
+        act(less, "button")
+        wait_for_tree(collapsed, "collapsed")
+        # Its newest's x dismisses that one only.
+        act('Dismiss "A3"', "button")
+        wait_for_tree(lambda t: lacks("label", "A3")(t) and has("label", "A2")(t) and has("button", "Alpha, 2 notifications, expand")(t), "A3 alone dismissed")
+        assert re.search(rf"NotificationClosed\s+uint32 {alpha[2]}\s+uint32 2", signals()), signals()
+        # A swipe on the collapsed stack dismisses the rest.
+        move(*spot)
+        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
+        for i in range(1, 11):
+            move(spot[0] - 16 * i, spot[1])
+            time.sleep(0.05)
+        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
+        wait_for_tree(lambda t: all(lacks("label", f"A{i}")(t) for i in (1, 2, 3)) and lacks("button", less)(t), "Alpha swiped away")
+        for nid in alpha:
+            assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), (nid, signals())
+        # An expanded stack's x clears them all.
+        gamma = [as_user(f"notify-send -a Gamma -p -t 1 G{i} body").strip() for i in (1, 2)]
+        wait_for_tree(has("button", "Gamma, 2 notifications, expand"), "Gamma stacked")
+        act("Gamma, 2 notifications, expand", "button")
+        wait_for_tree(has("button", "Clear Gamma"), "Gamma expanded")
+        act("Clear Gamma", "button")
+        wait_for_tree(lambda t: lacks("label", "G1")(t) and lacks("label", "G2")(t) and lacks("label", "Gamma")(t), "Gamma cleared")
+        for nid in gamma:
+            assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), (nid, signals())
+        close_history()
 
     with subtest("Do Not Disturb, kept with the history over a restart"):
         history()

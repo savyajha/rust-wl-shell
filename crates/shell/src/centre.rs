@@ -1,12 +1,14 @@
 //! The Notification Centre, as macOS's: a solid panel down the right of an output, below
 //! the bar, opened by its clock. Do Not Disturb, then the notifications' history, grouped
 //! by app (the app with the newest first), newest first in each group, each with × and
-//! swiped away as a banner is, and "Clear all". It closes on Escape, on the clock, and on
+//! swiped away as a banner is, and "Clear all". An app's two or more stack, collapsed
+//! until a click expands them. It closes on Escape, on the clock, and on
 //! a click anywhere else: it takes the keyboard on demand, which niri moves away on any
 //! click outside it.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::collections::HashSet;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use gtk4::{self as gtk, gdk, glib, prelude::*};
@@ -15,7 +17,7 @@ use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::notifications::{Banners, STEP, act, content, swipe};
+use crate::notifications::{Banners, STEP, act, clicked, content, swipe};
 use crate::popover::{self, Switch, title};
 
 /// Its slide in and out: its whole surface moved, by its right margin.
@@ -23,6 +25,8 @@ const SLIDE: Duration = Duration::from_millis(200);
 /// Its width less this is past the output's edge when it starts and ends its slide: one
 /// pixel on the output, as niri gives frames only to a surface it shows.
 const OFF: i32 = -1;
+/// A stack expanding or collapsing.
+const REVEAL: Duration = Duration::from_millis(150);
 
 pub struct Centre {
     width: i32,
@@ -50,6 +54,65 @@ struct Open {
     /// The history the list shows: built again only when it changes (not, say, for a
     /// banner's time), so that a card keeps its hover, a swipe and the keyboard.
     shown: RefCell<Option<Vec<Notification>>>,
+    /// The apps whose stacks are expanded, while it is open (each stack's too).
+    expanded: Rc<RefCell<HashSet<String>>>,
+    /// The stacks the list shows (their buttons' and cards' handlers hold them weakly).
+    stacks: RefCell<Vec<Rc<Stack>>>,
+}
+
+/// An app's two or more cards. Collapsed: its newest, over peeks at the rest; a click on
+/// it, or "+N", expands it, and a swipe dismisses them all. Expanded: all of them, each
+/// its own, with "Show less" and × (all dismissed) by its title.
+struct Stack {
+    /// The apps expanded: whether this one is, kept with the open centre.
+    apps: Rc<RefCell<HashSet<String>>>,
+    app: String,
+    ids: Vec<u32>,
+    peeks: gtk::Revealer,
+    rest: gtk::Revealer,
+    /// "+N", or "Show less".
+    toggle: gtk::Button,
+    clear: gtk::Button,
+}
+
+impl Stack {
+    fn expanded(&self) -> bool {
+        self.apps.borrow().contains(&self.app)
+    }
+
+    /// Its widgets as it is: animated once shown.
+    fn show(&self) {
+        let expanded = self.expanded();
+        self.peeks.set_reveal_child(!expanded);
+        self.rest.set_reveal_child(expanded);
+        let (label, name) = match expanded {
+            true => ("Show less".into(), format!("{}, show less", self.app)),
+            false => (
+                format!("+{}", self.ids.len() - 1),
+                format!("{}, {} notifications, expand", self.app, self.ids.len()),
+            ),
+        };
+        if let Some(text) = self.toggle.child().and_downcast::<gtk::Label>() {
+            text.set_label(&label);
+        }
+        self.toggle
+            .update_property(&[gtk::accessible::Property::Label(&name)]);
+        self.toggle
+            .update_state(&[gtk::accessible::State::Expanded(Some(expanded))]);
+        self.clear.set_visible(expanded);
+    }
+
+    fn expand(&self, expanded: bool) {
+        let mut apps = self.apps.borrow_mut();
+        let changed = match expanded {
+            true => apps.insert(self.app.clone()),
+            false => apps.remove(&self.app),
+        };
+        drop(apps);
+        if changed {
+            self.show();
+        }
+    }
 }
 
 impl Centre {
@@ -175,6 +238,8 @@ impl Centre {
             header,
             list,
             shown: RefCell::default(),
+            expanded: Rc::default(),
+            stacks: RefCell::default(),
         }));
         self.fill();
     }
@@ -216,24 +281,125 @@ impl Centre {
             empty.add_css_class("empty");
             open.list.append(&empty);
         }
-        for (app, notifications) in groups(&state.history) {
-            let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            group.add_css_class("group");
-            group.append(&title(app));
-            for n in notifications {
-                group.append(&self.card(n));
-            }
+        let groups = groups(&state.history);
+        // An app gone, or down to one, is collapsed should it stack again.
+        open.expanded
+            .borrow_mut()
+            .retain(|app| groups.iter().any(|(a, list)| a == app && list.len() > 1));
+        let mut stacks = Vec::new();
+        for (app, notifications) in &groups {
+            let group = self.group(app, notifications, &open.expanded, &mut stacks);
             open.list.append(&group);
         }
+        open.stacks.replace(stacks);
+    }
+
+    /// An app's group: its title, then its card, or its stack (kept in `stacks`).
+    fn group(
+        self: &Rc<Self>,
+        app: &str,
+        notifications: &[&Notification],
+        expanded: &Rc<RefCell<HashSet<String>>>,
+        stacks: &mut Vec<Rc<Stack>>,
+    ) -> gtk::Box {
+        let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        group.add_css_class("group");
+        let head = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        head.add_css_class("header");
+        let name = title(app);
+        name.set_hexpand(true);
+        head.append(&name);
+        group.append(&head);
+        let [newest, rest @ ..] = notifications else {
+            return group;
+        };
+        if rest.is_empty() {
+            group.append(&self.card(newest, None));
+            return group;
+        }
+        // Named for screen readers (a label set as the button's own would name it).
+        let button = |label: &str| {
+            let button = gtk::Button::builder()
+                .child(&gtk::Label::new(Some(label)))
+                .css_classes(["clear"])
+                .build();
+            head.append(&button);
+            button
+        };
+        let (toggle, clear) = (button(""), button("×"));
+        clear.update_property(&[gtk::accessible::Property::Label(&format!("Clear {app}"))]);
+        let peeks = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        // Two at most, however many are behind.
+        for _ in 0..rest.len().min(2) {
+            let peek = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            peek.add_css_class("peek");
+            peeks.append(&peek);
+        }
+        let cards = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        cards.add_css_class("rest");
+        let revealer = |child: &gtk::Box, transition| {
+            gtk::Revealer::builder()
+                .transition_type(transition)
+                .transition_duration(REVEAL.as_millis() as u32)
+                .child(child)
+                .build()
+        };
+        let stack = Rc::new(Stack {
+            apps: expanded.clone(),
+            app: app.into(),
+            ids: notifications.iter().map(|n| n.id).collect(),
+            peeks: revealer(&peeks, gtk::RevealerTransitionType::SlideUp),
+            rest: revealer(&cards, gtk::RevealerTransitionType::SlideDown),
+            toggle,
+            clear,
+        });
+        stack.show();
+        // Its newest, its peeks and the rest together, a click anywhere on them expanding
+        // it (a button in a card takes its own).
+        let pile = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        pile.append(&self.card(newest, Some(&stack)));
+        pile.append(&stack.peeks);
+        pile.append(&stack.rest);
+        for n in rest {
+            cards.append(&self.card(n, None));
+        }
+        group.append(&pile);
+        let weak = Rc::downgrade(&stack);
+        clicked(&pile, move |_| {
+            if let Some(stack) = weak.upgrade() {
+                stack.expand(true);
+            }
+        });
+        let weak = Rc::downgrade(&stack);
+        stack.toggle.connect_clicked(move |_| {
+            if let Some(stack) = weak.upgrade() {
+                stack.expand(!stack.expanded());
+            }
+        });
+        let (requests, ids) = (self.requests.clone(), stack.ids.clone());
+        stack.clear.connect_clicked(move |_| {
+            let _ = requests.send(Request::Dismiss(ids.clone()));
+        });
+        stacks.push(stack);
+        group
     }
 
     /// A notification's card: swiped away as a banner, a click on it its default action
-    /// (when it still has one: not after a restart), which closes the centre.
-    fn card(self: &Rc<Self>, n: &Notification) -> gtk::Overlay {
+    /// (when it still has one: not after a restart), which closes the centre. On top of
+    /// `stack` while it is collapsed: a swipe dismisses it all, and a click expands it.
+    fn card(self: &Rc<Self>, n: &Notification, stack: Option<&Rc<Stack>>) -> gtk::Overlay {
         // Its time ("5m") as of when the list was built (on opening and on each change).
         let card = content(n, self.requests.clone(), None, true);
         let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);
+        let stack = stack.map(Rc::downgrade);
+        let collapsed = move || {
+            stack
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .filter(|s| !s.expanded())
+        };
+        let ids = collapsed.clone();
         // Out either way, as far as it has faded out.
         let out = 2.0 * self.swipe;
         swipe(
@@ -242,21 +408,21 @@ impl Centre {
             move || (out, out),
             moved,
             move || {
-                let _ = requests.send(Request::Dismiss(id));
+                let ids = ids().map_or(vec![id], |stack| stack.ids.clone());
+                let _ = requests.send(Request::Dismiss(ids));
             },
         );
         if n.actions.iter().any(|(key, _)| key == "default") {
-            let click = gtk::GestureClick::new();
             let (requests, centre) = (self.requests.clone(), Rc::downgrade(self));
-            click.connect_released(move |click, _, _, _| {
-                if let Some(widget) = click.widget() {
-                    act(&requests, id, "default", &widget);
+            clicked(&card, move |card| {
+                if collapsed().is_some() {
+                    return;
                 }
+                act(&requests, id, "default", card);
                 if let Some(centre) = centre.upgrade() {
                     centre.close();
                 }
             });
-            card.add_controller(click);
         }
         card
     }

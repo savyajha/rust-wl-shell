@@ -322,17 +322,11 @@ impl Banners {
         );
         let dismissed = requests.clone();
         swipe(&card, self.swipe, out, moved, move || {
-            let _ = dismissed.send(Request::Dismiss(id));
+            let _ = dismissed.send(Request::Dismiss(vec![id]));
         });
         if n.actions.iter().any(|(key, _)| key == "default") {
-            let click = gtk::GestureClick::new();
             let requests = requests.clone();
-            click.connect_released(move |click, _, _, _| {
-                if let Some(widget) = click.widget() {
-                    act(&requests, id, "default", &widget);
-                }
-            });
-            card.add_controller(click);
+            clicked(&card, move |card| act(&requests, id, "default", card));
         }
         if let Some(countdown) = countdown {
             countdown.follow(&card, menu.as_ref());
@@ -563,7 +557,7 @@ fn close(n: &Notification, requests: UnboundedSender<Request>) -> gtk::Button {
         .map_or("Dismiss".into(), |name| format!("Dismiss \"{name}\""));
     close.update_property(&[gtk::accessible::Property::Label(&name)]);
     close.connect_clicked(move |_| {
-        let _ = requests.send(Request::Dismiss(id));
+        let _ = requests.send(Request::Dismiss(vec![id]));
     });
     close
 }
@@ -600,6 +594,18 @@ fn ago(time: u64) -> String {
     }
 }
 
+/// A click on `widget`: `then` on its release (none after a swipe, which claims the
+/// press).
+pub fn clicked(widget: &impl IsA<gtk::Widget>, then: impl Fn(&gtk::Widget) + 'static) {
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |click, _, _, _| {
+        if let Some(widget) = click.widget() {
+            then(&widget);
+        }
+    });
+    widget.add_controller(click);
+}
+
 /// A horizontal swipe on `widget`, by a drag or by a two-finger touchpad scroll: `moved`
 /// with its offset as it goes, and on its end: on out past `distance`, or when flung
 /// that way, to `out`'s offset that way (left, right; 0: not that way), and then
@@ -631,6 +637,7 @@ pub fn swipe(
     };
     // Where it started: the offset then, and the pointer.
     let start = Rc::new(Cell::new((0.0, 0.0)));
+    let threshold = f64::from(widget.settings().gtk_dnd_drag_threshold());
     let (s, from) = (swipe.clone(), start.clone());
     drag.connect_drag_begin(move |drag, _, _| {
         from.set((s.at.get(), x(drag)));
@@ -639,7 +646,13 @@ pub fn swipe(
     let s = swipe.clone();
     drag.connect_drag_update(move |drag, _, _| {
         let (at, from) = start.get();
-        s.to(at + x(drag) - from, Some(drag.current_event_time()));
+        let dx = x(drag) - from;
+        // Past GTK's drag threshold the press is the swipe's: a click on the card (or in
+        // it), whose `released` would follow a drag too, is cancelled.
+        if dx.abs() > threshold {
+            drag.set_state(gtk::EventSequenceState::Claimed);
+        }
+        s.to(at + dx, Some(drag.current_event_time()));
     });
     let s = swipe.clone();
     drag.connect_drag_end(move |drag, _, _| s.end(Some(drag.current_event_time())));

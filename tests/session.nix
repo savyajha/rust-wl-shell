@@ -99,8 +99,9 @@ let
                         yield from radios(child)
 
             print(json.dumps(list(radios(bar[0]))))
-        elif sys.argv[1:2] == ["--extents"]:
-            # The first node so named: its place in its window, and its size.
+        elif sys.argv[1:2] in (["--extents"], ["--expanded"]):
+            # The first node so named: its place in its window and its size, or
+            # whether it is expanded.
             def found(node):
                 if node.get_name() == sys.argv[2]:
                     return node
@@ -110,9 +111,13 @@ let
                     if hit:
                         return hit
                 return None
-            node = found(bar[0]).get_component_iface()
-            box = node.get_extents(Atspi.CoordType.WINDOW)
-            print(json.dumps([box.x, box.y, box.width, box.height]))
+            node = found(bar[0])
+            if sys.argv[1] == "--expanded":
+                states = node.get_state_set()
+                print(json.dumps(states.contains(Atspi.StateType.EXPANDED)))
+            else:
+                box = node.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                print(json.dumps([box.x, box.y, box.width, box.height]))
         elif sys.argv[1:2] == ["--root-child"]:
             # The shell's root's child at an index, asked on the a11y bus directly (an
             # index past its shown windows, as a client whose count is stale asks).

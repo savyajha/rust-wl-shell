@@ -373,7 +373,18 @@ In the UI (`notifications.rs`, `clock.rs`):
   Disturb" (a switch, libadwaita's as the popovers'), then "Notifications" with "Clear
   all", and the history grouped by app (the app with the newest first, `centre::groups`),
   each entry a card as a banner's, with ×, swiped away, a click its default action
-  while it still has one (closing it); "No notifications" when empty. It scrolls. The
+  while it still has one (closing it); "No notifications" when empty. An app with two
+  or more stacks, as macOS's: collapsed, its newest card over up to two peeks (thin
+  strips, each narrower and dimmer, `--peek-*`) and "+N" (the others) by its title; a
+  click on it, or "+N" (named "<app>, N notifications, expand" for screen readers),
+  expands it, and a swipe on it dismisses them all. Expanded, all its
+  cards, each its own, and "Show less" and × (all of them dismissed) by its title; a
+  150 ms slide (`GtkRevealer`, inside the panel). The apps expanded are kept while it
+  is open, over the list's rebuilds (one down to a card, or gone, forgotten), and reset
+  on closing. A swipe claims its press once past GTK's drag threshold, so GTK cancels
+  the clicks on and in the card (its `released` follows a drag too: a swipe would
+  end in a click). A stack's swipe or × is one `Dismiss` of all its ids (one update).
+  It scrolls. The
   list is built again only when the history changes (a banner's countdown, say, leaves
   it), so a card keeps its hover, a swipe and the keyboard. It is
   a layer surface on the top layer (namespace `rust-wl-shell-centre`, for a niri

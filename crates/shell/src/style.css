@@ -88,6 +88,11 @@ window {
   --centre-padding: var(--space-xxl);
   --centre-spacing: var(--space-xxl);
   --centre-card-gap: var(--space-m);
+  /* A collapsed stack's peeks at the cards behind its newest: strips under it, each
+     narrower by an inset on both sides than the one above, and dimmer. */
+  --peek-height: 6px;
+  --peek-inset: var(--space-l);
+  --peek-dim: 0.6;
 
   /* The banners, as the popovers: opaque, in the theme's popover colours, outlined as
      libadwaita's popovers are. */
@@ -488,6 +493,24 @@ window.centre .list {
 
 window.centre .group {
   border-spacing: var(--centre-card-gap);
+}
+
+window.centre .rest {
+  margin-top: var(--centre-card-gap);
+  border-spacing: var(--centre-card-gap);
+}
+
+window.centre .peek {
+  min-height: var(--peek-height);
+  margin: 0 var(--peek-inset);
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
+  background-color: var(--card);
+  opacity: var(--peek-dim);
+}
+
+window.centre .peek + .peek {
+  margin: 0 calc(2 * var(--peek-inset));
+  opacity: calc(var(--peek-dim) * var(--peek-dim));
 }
 
 window.centre .card {
