@@ -23,7 +23,9 @@
 #      removes the banner and the history entry (closed, 3)
 #   8. a click runs the default action, with an ActivationToken first; one action, its
 #      button alone; two around the default, both buttons; with three, the first's
-#      button and "Options", a menu of the other two, one of which reaches the app; long
+#      button and "Options", a menu of the other two, one of which reaches the app; the
+#      buttons under the text, the x at the card's top-right still; the menu under its
+#      button, not the banner's width; long
 #      labels ellipsized; the history's cards show no actions; all close the
 #      notification; the Options menu takes the keyboard: Escape closes it, and typing
 #      reaches the window again
@@ -305,7 +307,7 @@ pkgs.testers.runNixOSTest {
         def settings_width(body):
             background(f"notify-send -a Other -A settings=Settings --wait -t 20000 Short '{body}'", "/tmp/short")
             wait_for_tree(has("button", "Settings"), "its Settings button")
-            width = json.loads(as_user("atspi-tree --extents Settings"))[0]
+            width = json.loads(as_user("atspi-tree --extents Settings"))[2]
             act("Settings")
             wait_for_tree(lacks("button", "Settings"), "acted on")
             return width
@@ -333,8 +335,34 @@ pkgs.testers.runNixOSTest {
         wait_for_tree(has("toggle button", "Options"), "Options")
         t = tree()
         assert has("button", "Alpha")(t) and lacks("button", "Beta")(t), t
+        # The buttons under the text, the x still at the card's top-right (the banner the
+        # top one): shown on hover, inset by the border (1 px) and padding (10 px, 12 px).
+        right, top = 1024 - 8, HEIGHT + 8
+        move(100, 700)
+        time.sleep(0.5)
+        away = screen()
+        move(right - 300, top + 30)
+        time.sleep(0.8)
+        over = screen()
+        corner = [(x, y) for x in range(right - 60, 1024) for y in range(top - 4, top + 40)]
+        changed = [(x, y) for x, y in corner if pixel(away, x, y) != pixel(over, x, y)]
+        xs, ys = [x for x, _ in changed], [y for _, y in changed]
+        assert changed and abs(max(xs) - (right - 14)) <= 1 and abs(min(ys) - (top + 11)) <= 1, changed[:5]
         act("Options", "toggle button")
         wait_for_tree(has("button", "Beta"), "the actions' menu")
+        # The menu under its button (the banner the top one), not the banner's width:
+        # its pixels below the card overlap the button's columns.
+        move(100, 700)
+        time.sleep(0.8)
+        shot = screen()
+        # In the gap below the card (the next banner 8 px under it): the menu, from the
+        # Options button's right edge, at the card's right, as narrow as its rows.
+        card = 1024 - 8 - 360
+        bottom = next(y for y in range(top + 40, 400) if is_grey(pixel(shot, card + 20, y)))
+        xs = [x for x in range(500, 1024) if is_popover(pixel(shot, x, bottom + 3))]
+        print(f"the card ends at {bottom}; its menu at {min(xs)}..{max(xs)}")
+        assert min(xs) > card + 150 and max(xs) - min(xs) < 300, (min(xs), max(xs))
+        assert max(xs) <= card + 360, ("past the card", max(xs))
         assert has("button", "Gamma")(tree()), tree()
         # It has the keyboard: Escape closes it, and typing reaches the window again.
         machine.send_key("esc")

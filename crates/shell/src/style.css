@@ -95,6 +95,8 @@ window {
   --banner-fg: @popover_fg_color;
   --banner-outline: rgba(0, 0, 0, 0.14);
   --banner-button: color-mix(in srgb, currentColor 10%, transparent);
+  --banner-button-hover: color-mix(in srgb, currentColor 18%, transparent);
+  --banner-button-active: color-mix(in srgb, currentColor 26%, transparent);
 }
 
 /* The bar: macOS's dark menu bar, a translucent tint over the compositor's blur, with white
@@ -305,6 +307,10 @@ popover.item-popover .note {
   padding: var(--space-xs) var(--space-s);
 }
 
+popover.item-popover .note.warning {
+  opacity: 1;
+}
+
 /* The disclosure ("Other Networks") as a row: its arrow in the row icons' column, its
    label in their labels'. */
 popover.item-popover expander-widget > box > title {
@@ -329,7 +335,6 @@ popover.item-popover .switch-row .title {
 popover.item-popover .after {
   opacity: var(--dim);
 }
-
 
 /* A notification's banner, as macOS's: an opaque card (its window no more than it), its
    app's icon (or its image, the icon a badge on it) on the left, the summary in bold, the
@@ -379,7 +384,8 @@ window.notification > .card {
 }
 
 /* The × over the time, shown in its place while the card is hovered or the × has the
-   keyboard. */
+   keyboard (in the Centre: a banner's × takes no focus, its window never having the
+   keyboard, as GTK would give it a new window's focus, and show it for good). */
 .card .slot > button.close {
   all: unset;
   min-width: var(--close-size);
@@ -407,8 +413,10 @@ window.notification > .card {
   background-color: var(--close-bg-hover);
 }
 
+/* A banner's actions: under its text, at the right, side by side. */
 .card .actions {
   border-spacing: var(--space-s);
+  margin-top: var(--space-s);
 }
 
 .card button.action,
@@ -419,6 +427,23 @@ window.notification > .card {
   box-shadow: none;
   border-radius: var(--radius-pill);
   padding: var(--space-xs) var(--space-xl);
+  transition: background var(--transition);
+}
+
+.card button.action:hover,
+.card menubutton.action > button:hover,
+.card menubutton.action > button:checked {
+  background: var(--banner-button-hover);
+}
+
+.card button.action:active,
+.card menubutton.action > button:active {
+  background: var(--banner-button-active);
+}
+
+/* The "Options" menu: as the bar's popovers, but as wide as its rows. */
+popover.item-popover.menu > contents {
+  min-width: 0;
 }
 
 /* The Notification Centre: a solid panel down the output's right, below the bar, in the

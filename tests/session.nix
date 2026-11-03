@@ -100,7 +100,7 @@ let
 
             print(json.dumps(list(radios(bar[0]))))
         elif sys.argv[1:2] == ["--extents"]:
-            # The first node so named: its width and height on screen.
+            # The first node so named: its place in its window, and its size.
             def found(node):
                 if node.get_name() == sys.argv[2]:
                     return node
@@ -112,7 +112,7 @@ let
                 return None
             node = found(bar[0]).get_component_iface()
             box = node.get_extents(Atspi.CoordType.WINDOW)
-            print(json.dumps([box.width, box.height]))
+            print(json.dumps([box.x, box.y, box.width, box.height]))
         elif sys.argv[1:2] == ["--root-child"]:
             # The shell's root's child at an index, asked on the a11y bus directly (an
             # index past its shown windows, as a client whose count is stale asks).

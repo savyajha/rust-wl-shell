@@ -13,9 +13,10 @@ use shell_core::config::{Config, Corner};
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-/// Between a banner and its menu ("Options").
+/// Between the "Options" button and its menu.
 const MENU_GAP: i32 = 6;
-/// A banner's first moments: the pointer entering it then was there when it showed.
+/// A banner's first moments, from its map: the pointer entering it then was there when it
+/// showed.
 const SETTLED: Duration = Duration::from_millis(500);
 
 /// A banner's pending timeout, if it has one.
@@ -212,7 +213,7 @@ impl Banners {
                     let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
                     let menu = gtk::Popover::builder()
                         .child(&rows)
-                        .css_classes(["item-popover"])
+                        .css_classes(["item-popover", "menu"])
                         .has_arrow(false)
                         .build();
                     for (key, label) in rest {
@@ -233,9 +234,19 @@ impl Banners {
                     side.append(&options);
                     (options, menu)
                 });
+                // Taking no focus, as the ×: a banner's window never has the keyboard (but
+                // its menu, whose rows do), and GTK would give them its first focus.
                 let mut child = side.first_child();
                 while let Some(widget) = child {
                     widget.add_css_class("action");
+                    // A menu button's own button takes its focus.
+                    let focus = match widget.downcast_ref::<gtk::MenuButton>() {
+                        Some(options) => options.first_child(),
+                        None => Some(widget.clone()),
+                    };
+                    if let Some(focus) = focus {
+                        focus.set_focusable(false);
+                    }
                     child = widget.next_sibling();
                 }
                 (Some(side.upcast::<gtk::Widget>()), options)
@@ -243,23 +254,16 @@ impl Banners {
         };
         let card = content(n, requests.clone(), side.as_ref(), false);
         let menu = options.as_ref().map(|(_, menu)| menu.clone());
-        if let Some((button, menu)) = &options {
-            // The menu takes the keyboard while open (Escape), as the bar's popovers; below
-            // the banner, at the button's right edge, as macOS's.
+        if let Some((_, menu)) = &options {
+            // Under its button, a gap from it, its right edge the button's (so it grows over
+            // the card, never past it), as macOS's menus; it takes the keyboard while open
+            // (Escape), as the bar's popovers. Weak: the menu lives in the window.
             menu.set_halign(gtk::Align::End);
-            // Weak: the menu lives in the window.
+            menu.set_offset(0, MENU_GAP);
             menu.connect_show(glib::clone!(
                 #[weak]
                 window,
-                #[weak]
-                button,
-                move |menu| {
-                    if let Some(b) = button.compute_bounds(&window) {
-                        let below = window.height() as f32 - b.y() - b.height();
-                        menu.set_offset(0, below as i32 + MENU_GAP);
-                    }
-                    window.set_keyboard_mode(KeyboardMode::OnDemand);
-                }
+                move |_| window.set_keyboard_mode(KeyboardMode::OnDemand)
             ));
             menu.connect_closed(glib::clone!(
                 #[weak]
@@ -271,11 +275,18 @@ impl Banners {
         // GTK closes an open popover on a click outside it, and keeps the click: closed
         // first, by the pointer coming onto the banner, the click (on ×) reaches it. While
         // the popover holds its grab, the banner gets no motion, only the pointer's enter:
-        // one at once is the banner showing under a still pointer, which leaves it open.
+        // one soon after it maps is the banner showing under a still pointer (from then, not
+        // from when it was built, which a slow host shows long after), which leaves it
+        // open.
         let hover = gtk::EventControllerMotion::new();
-        let built = Instant::now();
+        let shown = Rc::new(Cell::new(None));
+        let first = shown.clone();
+        window.connect_map(move |_| first.set(Some(Instant::now())));
         hover.connect_enter(move |_, _, _| {
-            if built.elapsed() > SETTLED {
+            if shown
+                .get()
+                .is_some_and(|at: Instant| at.elapsed() > SETTLED)
+            {
                 crate::popover::close_open();
             }
         });
@@ -422,7 +433,7 @@ fn chromium_settings(n: &Notification, key: &str) -> bool {
 /// else the icon it sent), or its image with the app's icon as a badge on it; the summary,
 /// with the time after it (`time`: in the Notification Centre) and its × (sending
 /// `requests` its dismissal) in the time's place while hovered, the body (three lines at
-/// most); `side` (its actions) on the right.
+/// most); `side` (its actions) under them, at the right.
 pub fn content(
     n: &Notification,
     requests: UnboundedSender<Request>,
@@ -487,6 +498,8 @@ pub fn content(
     stamp.add_css_class("time");
     slot.set_child(Some(&stamp));
     let close = close(n, requests);
+    // Focusable in the Centre only: a banner's window never has the keyboard.
+    close.set_focusable(time);
     slot.add_overlay(&close);
     slot.set_measure_overlay(&close, true);
     top.append(&slot);
@@ -507,9 +520,11 @@ pub fn content(
         text.append(&body);
     }
     main.append(&text);
+    // The actions under the text, at its right: the summary line keeps the card's width,
+    // its × at the card's top-right.
     if let Some(side) = side {
-        side.set_valign(gtk::Align::Center);
-        main.append(side);
+        side.set_halign(gtk::Align::End);
+        text.append(side);
     }
     gtk::Overlay::builder()
         .child(&main)

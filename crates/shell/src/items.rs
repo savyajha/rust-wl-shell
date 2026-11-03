@@ -43,12 +43,16 @@ impl BatteryItem {
         let item = Item::new(&face, "Battery");
         let lines = [(); 3].map(|()| gtk::Label::builder().xalign(0.0).build());
         lines[0].add_css_class("title");
-        for line in &lines {
+        for line in &lines[1..] {
             line.add_css_class("line");
+        }
+        for line in &lines {
             item.content.append(line);
         }
         let power_mode = profiles.map(|requests| {
             let (section, rows, degraded) = section("Power Mode");
+            // A warning, not an empty state: not dimmed as a note is.
+            degraded.add_css_class("warning");
             section.set_visible(false);
             item.content.append(&section);
             PowerMode {

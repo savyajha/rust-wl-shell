@@ -292,12 +292,16 @@ In the UI (`notifications.rs`, `clock.rs`):
   Chromium adds to every web notification, from a `desktop-entry` of a Chromium-based
   browser: Brave, Chromium, Chrome, Edge, Vivaldi, by the desktop names their Linux
   packages use; a Flatpak's (`com.brave.Browser`, say) or another fork's is not matched)
-  is left out. Two buttons at most, on
-  the right (`default`, its click, is none of them): one or two actions other than
+  is left out. Two buttons at most, side by side in a row under the text, at its right
+  (so the text and the summary line, with its ×, keep the card's width; `default`, its
+  click, is none of them), with a lighter fill while hovered and lighter still while
+  pressed (`--banner-button-hover`, `--banner-button-active`): one or two actions other than
   `default` each a button (its label ellipsized past 12 characters, but as wide as its
   text up to 10, so two still fit, else the wrapping body takes the width and cuts a short one; its key
   with no label); three or more, the first one's button and "Options", a menu
-  button whose popover (the bar's popovers' look) lists the others, below the banner at the button's right edge, taking the keyboard while open
+  button whose popover (the bar's popovers' look) lists the others, under the button, its right edge the button's (growing leftwards over
+  the card, never past it), `MENU_GAP` (6 px) from it, as
+  wide as its rows (`menu`: no `--popover-width`), as macOS's menus, taking the keyboard while open
   (`OnDemand`, as the bar's popovers; Escape closes it). × is a square in the theme's
   red (`@destructive_bg_color`, its glyph `@destructive_fg_color`; libadwaita's in
   `fallback.css`), rounded at 6 px as niri's windows, at the summary line's end (left of
@@ -496,7 +500,7 @@ on another surface of ours goes to that surface, where GTK's autohide (GDK's
 `check_autohide`) closes the popover and keeps the press. So the pointer coming onto a
 banner closes an open popover first (`popover::close_open`), and a click on the banner's ×
 dismisses it. While the popover holds its grab the banner gets no motion, only the
-pointer's enter (seen in nested niri); an enter in the banner's first 500 ms is the banner
+pointer's enter (seen in nested niri); an enter in the 500 ms from the banner's map (not from when it was built, which a slow host shows long after) is the banner
 showing under a still pointer, which leaves the popover open (but a banner moved under it
 as the stack shifts, older than that, still closes it). A popover stays open over niri's overview.
 
