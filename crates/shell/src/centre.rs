@@ -15,13 +15,11 @@ use shell_core::config::Config;
 use shell_core::notifications::{Notification, Notifications, Request};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::notifications::{Banners, act, content, swipe};
+use crate::notifications::{Banners, STEP, act, content, swipe};
 use crate::popover::{self, Switch, title};
 
 /// Its slide in and out: its whole surface moved, by its right margin.
 const SLIDE: Duration = Duration::from_millis(200);
-/// A step of the slide: about a frame.
-const STEP: Duration = Duration::from_millis(8);
 /// Its width less this is past the output's edge when it starts and ends its slide: one
 /// pixel on the output, as niri gives frames only to a surface it shows.
 const OFF: i32 = -1;
@@ -236,7 +234,7 @@ impl Centre {
         let card = content(n, self.requests.clone(), None, true);
         let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);
-        swipe(&card, self.swipe, true, moved, move || {
+        swipe(&card, self.swipe, moved, move || {
             let _ = requests.send(Request::Dismiss(id));
         });
         if n.actions.iter().any(|(key, _)| key == "default") {
@@ -290,7 +288,7 @@ fn follow_swipe(card: &gtk::Overlay, distance: f64) -> impl Fn(f64) + Clone + 's
         if let Some(card) = card.upgrade() {
             card.set_margin_start(dx.max(0.0) as i32);
             card.set_margin_end((-dx).max(0.0) as i32);
-            card.set_opacity(1.0 - (dx.abs() / (2.0 * distance)).min(0.8));
+            card.set_opacity(1.0 - (dx.abs() / (2.0 * distance)).min(1.0));
         }
     }
 }

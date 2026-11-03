@@ -32,7 +32,9 @@
 #   9. x shows at the end of a banner's summary line (its top-right, inset by its padding), while
 #      hovered, and dismisses it (closed, 2), as does its x named after the summary (or
 #      the app, with none), through AT-SPI
-#  10. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2)
+#  10. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2); one short
+#      of the distance goes back (a wheel's, though it sends no end and the banner slid
+#      from under the pointer; a slow drag's), unless flung (closed, 2)
 #  11. the Notification Centre: a solid panel down the output's right, below the bar,
 #      the full height; a notification arriving while it is open shows in it, which
 #      stays open; a click on the desktop or on a window closes it, as do Escape (and it
@@ -445,6 +447,70 @@ pkgs.testers.runNixOSTest {
             machine.succeed("ydotool mousemove --wheel -x 1 -y 0")
             time.sleep(0.05)
         wait_for_tree(banner_gone("Scrolled"), "swiped by a scroll")
+
+    with subtest("a swipe short of the distance goes back, unless flung"):
+        y = HEIGHT + 8 + 40
+        card = 1024 - 8 - 360
+
+        def at_rest():
+            """The banner where it shows, and opaque."""
+            shot = screen()
+            left = next((x for x in range(400, 1024) if is_popover(pixel(shot, x, y))), None)
+            return left is not None and abs(left - card) <= 2 and is_popover(pixel(shot, 1024 - 16, y))
+
+        def back_at_rest(what):
+            for _ in range(30):
+                if at_rest():
+                    return
+                time.sleep(0.1)
+            machine.send_monitor_command(f"screendump {machine.out_dir}/stuck.ppm gpu 0")
+            raise Exception(f"{what}: the banner not back")
+
+        def close(nid):
+            as_user(CALL + f"CloseNotification u {nid}")
+
+        # Two notches of a sideways wheel (no scroll end), which slide the banner right from
+        # under the pointer left still: it goes back, and a scroll on it swipes it again.
+        nid = as_user(NOTIFY + "-p -t 20000 Short body").strip()
+        wait_for_tree(banner_shown("Short"), "the banner")
+        back_at_rest("shown")
+        move(card + 20, y)
+        for _ in range(2):
+            machine.succeed("ydotool mousemove --wheel -x -1 -y 0")
+            time.sleep(0.05)
+        back_at_rest("a short scroll")
+        move(card + 200, y)
+        for _ in range(5):
+            machine.succeed("ydotool mousemove --wheel -x 1 -y 0")
+            time.sleep(0.05)
+        wait_for_tree(banner_gone("Short"), "swiped by a scroll after")
+        # A quick flick short of the distance goes.
+        nid = as_user(NOTIFY + "-p -t 20000 Flung body").strip()
+        wait_for_tree(banner_shown("Flung"), "the banner")
+        x = card + 60
+        move(x, y)
+        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
+        for i in range(1, 4):
+            time.sleep(0.02)
+            move(x + 20 * i, y)
+        time.sleep(0.02)
+        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
+        wait_for_tree(banner_gone("Flung"), "flung")
+        assert re.search(rf"NotificationClosed\s+uint32 {nid}\s+uint32 2", signals()), signals()
+        # A slow drag as far, let go after a stop, goes back.
+        nid = as_user(NOTIFY + "-p -t 20000 Slow body").strip()
+        wait_for_tree(banner_shown("Slow"), "the banner")
+        move(x, y)
+        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
+        for i in range(1, 7):
+            time.sleep(0.1)
+            move(x + 10 * i, y)
+        time.sleep(0.3)
+        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
+        back_at_rest("a slow drag")
+        assert banner_shown("Slow")(tree()), "dismissed"
+        close(nid)
+        wait_for_tree(banner_gone("Slow"), "closed")
 
     with subtest("the Notification Centre: down the right, closed by a click outside"):
         nid = as_user(NOTIFY + "-p -t 1 Centre body").strip()

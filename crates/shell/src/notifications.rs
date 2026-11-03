@@ -297,7 +297,7 @@ impl Banners {
             #[weak]
             window,
             move |dx: f64| {
-                window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(0.8));
+                window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(1.0));
                 match horizontal {
                     Some(Edge::Right) => window.set_margin(Edge::Right, gap - dx as i32),
                     Some(edge) => window.set_margin(edge, gap + dx as i32),
@@ -306,7 +306,7 @@ impl Banners {
             }
         );
         let dismissed = requests.clone();
-        swipe(&card, self.swipe, horizontal.is_some(), moved, move || {
+        swipe(&card, self.swipe, moved, move || {
             let _ = dismissed.send(Request::Dismiss(id));
         });
         if n.actions.iter().any(|(key, _)| key == "default") {
@@ -586,54 +586,186 @@ fn ago(time: u64) -> String {
 }
 
 /// A horizontal swipe on `widget`, by a drag or by a two-finger touchpad scroll: `moved`
-/// with the distance so far as it goes (0 again when it stops short), and `swiped` once
-/// it passes `distance`. `follows`: `moved` moves `widget` itself.
+/// with its offset as it goes, and on its end: on out past `distance`, or when flung
+/// that way, and then `swiped`; back to 0 otherwise.
 pub fn swipe(
     widget: &impl IsA<gtk::Widget>,
     distance: f64,
-    follows: bool,
-    moved: impl Fn(f64) + Clone + 'static,
-    swiped: impl Fn() + Clone + 'static,
+    moved: impl Fn(f64) + 'static,
+    swiped: impl Fn() + 'static,
 ) {
-    // The distance shown. A drag's offsets are in `widget`'s coordinates: when it moves
-    // with them, each offset is from where it was last moved to.
-    let shown = Rc::new(Cell::new(0.0));
+    let swipe = Rc::new(Swipe {
+        distance,
+        moved: Box::new(moved),
+        swiped: Box::new(swiped),
+        at: Cell::new(0.0),
+        state: Cell::new(State::Idle),
+        recent: RefCell::default(),
+        turn: Cell::new(0),
+    });
+    // A drag by the pointer's own moves: its surface's coordinates, not `widget`'s (which
+    // move with it), as niri keeps a surface where it was pressed until the release.
     let drag = gtk::GestureDrag::new();
-    let (follow, at) = (moved.clone(), shown.clone());
-    drag.connect_drag_update(move |_, dx, _| {
-        at.set(if follows { at.get() + dx } else { dx });
-        follow(at.get());
+    let x = |drag: &gtk::GestureDrag| {
+        let position = drag.current_event().and_then(|event| event.position());
+        position.map_or(0.0, |(x, _)| x)
+    };
+    // Where it started: the offset then, and the pointer.
+    let start = Rc::new(Cell::new((0.0, 0.0)));
+    let (s, from) = (swipe.clone(), start.clone());
+    drag.connect_drag_begin(move |drag, _, _| {
+        from.set((s.at.get(), x(drag)));
+        s.to(s.at.get(), Some(drag.current_event_time()));
     });
-    let (end, at, done) = (moved.clone(), shown.clone(), swiped.clone());
-    drag.connect_drag_end(move |_, _, _| {
-        if at.replace(0.0).abs() > distance {
-            done();
-        } else {
-            end(0.0);
-        }
+    let s = swipe.clone();
+    drag.connect_drag_update(move |drag, _, _| {
+        let (at, from) = start.get();
+        s.to(at + x(drag) - from, Some(drag.current_event_time()));
     });
-    widget.add_controller(drag);
+    let s = swipe.clone();
+    drag.connect_drag_end(move |drag, _, _| s.end(Some(drag.current_event_time())));
+    // As when a child takes the press (and an end after an end does nothing).
+    let s = swipe.clone();
+    drag.connect_cancel(move |_, _| s.end(None));
+    widget.add_controller(drag.clone());
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::HORIZONTAL);
-    let (follow, at) = (moved.clone(), shown.clone());
+    let s = swipe.clone();
     scroll.connect_scroll(move |scroll, dx, _| {
-        let step = if scroll.unit() == gdk::ScrollUnit::Wheel {
-            40.0
-        } else {
-            1.0
+        // A wheel's notches are steps, not a speed: no times to count.
+        let (step, time) = match scroll.unit() {
+            gdk::ScrollUnit::Wheel => (40.0, None),
+            _ => (1.0, Some(scroll.current_event_time())),
         };
-        at.set(at.get() - dx * step);
-        if at.get().abs() > distance {
-            at.set(0.0);
-            swiped();
+        s.to(s.at.get() - dx * step, time);
+        if s.at.get().abs() > distance {
+            s.end(None);
         } else {
-            follow(at.get());
+            let (turn, quiet) = (s.turn.get(), Rc::downgrade(&s));
+            glib::timeout_add_local_once(QUIET, move || {
+                if let Some(s) = quiet.upgrade().filter(|s| s.turn.get() == turn) {
+                    s.end(None);
+                }
+            });
         }
         glib::Propagation::Stop
     });
-    scroll.connect_scroll_end(move |_| {
-        if shown.replace(0.0) != 0.0 {
-            moved(0.0);
+    let s = swipe.clone();
+    scroll.connect_scroll_end(move |scroll| s.end(Some(scroll.current_event_time())));
+    widget.add_controller(scroll);
+    // The card slid from under the pointer (which a scroll leaves where it was): its
+    // scroll's end goes to what is under it now. A drag keeps the pointer.
+    let hover = gtk::EventControllerMotion::new();
+    hover.connect_leave(move |_| {
+        if !drag.is_active() {
+            let last = swipe.recent.borrow().last().map(|&(time, _)| time);
+            swipe.end(last);
         }
     });
-    widget.add_controller(scroll);
+    widget.add_controller(hover);
+}
+
+/// A swipe released this fast (logical px/s) towards where it went goes, however short:
+/// a flick's speed, well over a hand's easing a card it means to keep.
+const FLING: f64 = 600.0;
+/// The release speed is over the moves in this last stretch (ms, by the events' times).
+const RECENT: u32 = 100;
+/// A scroll swipe ends after this long without a scroll: a wheel sends no end, and a
+/// touchpad's can go to another surface. Well past a touchpad's ~10 ms between scrolls
+/// and the notches of a wheel turned at once, short enough not to show as a stop.
+const QUIET: Duration = Duration::from_millis(150);
+/// A released swipe going on out, or going back.
+const SETTLE: Duration = Duration::from_millis(160);
+/// A step of an animation: about a frame.
+pub const STEP: Duration = Duration::from_millis(8);
+
+/// A swipe's state: what `swipe` shares between its controllers and timers.
+struct Swipe {
+    distance: f64,
+    moved: Box<dyn Fn(f64)>,
+    swiped: Box<dyn Fn()>,
+    /// The offset shown.
+    at: Cell<f64>,
+    state: Cell<State>,
+    /// Its moves since its first: (event time in ms, offset).
+    recent: RefCell<Vec<(u32, f64)>>,
+    /// Counts its moves and animations: a timer of an earlier one stops.
+    turn: Cell<u32>,
+}
+
+/// Where a swipe is: at rest (or easing back), moved by a hand, or going out.
+#[derive(Clone, Copy, PartialEq)]
+enum State {
+    Idle,
+    Moving,
+    Out,
+}
+
+impl Swipe {
+    /// A move to `at` (`time` its event's, when it counts towards the speed).
+    fn to(&self, at: f64, time: Option<u32>) {
+        if self.state.get() == State::Out {
+            return;
+        }
+        self.turn.set(self.turn.get() + 1);
+        self.state.set(State::Moving);
+        self.at.set(at);
+        if let Some(time) = time {
+            self.recent.borrow_mut().push((time, at));
+        }
+        (self.moved)(at);
+    }
+
+    /// Its end, let go at `time` (`None`: no speed): out, or back.
+    fn end(self: &Rc<Self>, time: Option<u32>) {
+        if self.state.get() != State::Moving {
+            return;
+        }
+        self.state.set(State::Idle);
+        let recent = self.recent.take();
+        let recent: Vec<_> = match time {
+            Some(time) => recent
+                .into_iter()
+                .filter(|&(t, _)| time.wrapping_sub(t) <= RECENT)
+                .collect(),
+            None => Vec::new(),
+        };
+        let speed = match (recent.first(), recent.last()) {
+            (Some(&(t0, x0)), Some(&(t1, x1))) if t1 != t0 => {
+                (x1 - x0) * 1000.0 / f64::from(t1.wrapping_sub(t0))
+            }
+            _ => 0.0,
+        };
+        let at = self.at.get();
+        let flung = speed.abs() > FLING && speed.signum() == at.signum();
+        if at.abs() > self.distance || (at != 0.0 && flung) {
+            // Far enough for the card to have faded out.
+            self.state.set(State::Out);
+            self.animate(at.signum() * 2.0 * self.distance);
+        } else if at != 0.0 {
+            self.animate(0.0);
+        }
+    }
+
+    /// The offset eased out to `to` over `SETTLE`, then `swiped` if going out. On a
+    /// timer, as `centre::slide` is; a move or another animation stops it.
+    fn animate(self: &Rc<Self>, to: f64) {
+        let turn = self.turn.get() + 1;
+        self.turn.set(turn);
+        let (from, start, swipe) = (self.at.get(), Instant::now(), Rc::downgrade(self));
+        glib::timeout_add_local(STEP, move || {
+            let Some(swipe) = swipe.upgrade().filter(|s| s.turn.get() == turn) else {
+                return glib::ControlFlow::Break;
+            };
+            let t = (start.elapsed().as_secs_f64() / SETTLE.as_secs_f64()).min(1.0);
+            swipe.at.set(from + (to - from) * (1.0 - (1.0 - t).powi(3)));
+            (swipe.moved)(swipe.at.get());
+            if t < 1.0 {
+                return glib::ControlFlow::Continue;
+            }
+            if swipe.state.get() == State::Out {
+                (swipe.swiped)();
+            }
+            glib::ControlFlow::Break
+        });
+    }
 }

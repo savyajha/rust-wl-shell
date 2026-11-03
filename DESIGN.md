@@ -341,10 +341,18 @@ In the UI (`notifications.rs`, `clock.rs`):
   launch context (xdg-activation, niri's), so the app may raise its window.
 - a swipe (`notifications::swipe`): a horizontal `GtkGestureDrag`, or a two-finger
   horizontal scroll (`GtkEventControllerScroll`; a wheel's steps count 40 px). The
-  banner follows it by its margin on its anchored side and fades; past `swipe-distance` (100 px) it is
-  dismissed, short of it it goes back. The drag's offsets are in the banner's own
-  coordinates, which move with it, so each is added to where it was. History rows
-  swipe the same way, shifted by their margins.
+  banner follows it by its margin on its anchored side and fades; history rows swipe
+  the same way, shifted by their margins. The drag is measured in its surface's
+  coordinates, not the card's: niri keeps a surface where it was pressed until the
+  release, so these are the pointer's own moves. A swipe ends on the drag's end or
+  cancel, the scroll's end, the pointer leaving the card while scrolling (a banner slid
+  from under a still pointer gets a `wl_pointer.leave`, and the scroll's end then goes
+  to whatever is under it), or 150 ms without a scroll (a wheel sends no end); a second
+  end does nothing. On its end it goes on out past `swipe-distance` (100 px), or when
+  released faster than 600 px/s that way (over its last 100 ms of moves, by the events'
+  times; a wheel's steps have no speed), easing out over 160 ms to twice the distance,
+  faded out, and is dismissed; short of both it eases back as long. Both run on a
+  GLib timer, as the Centre's slide; a new swipe stops the way back.
 - known limits: the name is claimed once, at start (another server leaving it later is
   not noticed); the banners stack by their heights as measured on the focused output,
   so a banner shown on another output (the focus moved) can leave a gap; the `resident`
