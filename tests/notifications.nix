@@ -32,9 +32,10 @@
 #   9. x shows at the end of a banner's summary line (its top-right, inset by its padding), while
 #      hovered, and dismisses it (closed, 2), as does its x named after the summary (or
 #      the app, with none), through AT-SPI
-#  10. a swipe dismisses a banner: a drag, and a horizontal scroll (closed, 2); one short
-#      of the distance goes back (a wheel's, though it sends no end and the banner slid
-#      from under the pointer; a slow drag's), unless flung (closed, 2)
+#  10. a swipe towards its edge dismisses a banner: a drag, and a horizontal scroll
+#      (closed, 2); one short of the distance goes back (a wheel's, though it sends no
+#      end and the banner slid from under the pointer; a slow drag's), unless flung
+#      (closed, 2); one inwards goes back, however far (a scroll) or fast (a flick)
 #  11. the Notification Centre: a solid panel down the output's right, below the bar,
 #      the full height; a notification arriving while it is open shows in it, which
 #      stays open; a click on the desktop or on a window closes it, as do Escape (and it
@@ -444,7 +445,7 @@ pkgs.testers.runNixOSTest {
         move(1024 - 8 - 200, y)
         machine.wait_for_unit("ydotoold.service")
         for _ in range(5):
-            machine.succeed("ydotool mousemove --wheel -x 1 -y 0")
+            machine.succeed("ydotool mousemove --wheel -x -1 -y 0")
             time.sleep(0.05)
         wait_for_tree(banner_gone("Scrolled"), "swiped by a scroll")
 
@@ -481,10 +482,31 @@ pkgs.testers.runNixOSTest {
         back_at_rest("a short scroll")
         move(card + 200, y)
         for _ in range(5):
-            machine.succeed("ydotool mousemove --wheel -x 1 -y 0")
+            machine.succeed("ydotool mousemove --wheel -x -1 -y 0")
             time.sleep(0.05)
         wait_for_tree(banner_gone("Short"), "swiped by a scroll after")
-        # A quick flick short of the distance goes.
+        # Inwards, away from its edge, it does not go, however far or fast: a scroll past
+        # the distance, and a flick.
+        nid = as_user(NOTIFY + "-p -t 20000 Inward body").strip()
+        wait_for_tree(banner_shown("Inward"), "the banner")
+        move(card + 200, y)
+        for _ in range(5):
+            machine.succeed("ydotool mousemove --wheel -x 1 -y 0")
+            time.sleep(0.05)
+        back_at_rest("an inward scroll")
+        x = card + 200
+        move(x, y)
+        input_events({"type": "btn", "data": {"down": True, "button": "left"}})
+        for i in range(1, 4):
+            time.sleep(0.02)
+            move(x - 20 * i, y)
+        time.sleep(0.02)
+        input_events({"type": "btn", "data": {"down": False, "button": "left"}})
+        back_at_rest("an inward flick")
+        assert banner_shown("Inward")(tree()), "dismissed inwards"
+        close(nid)
+        wait_for_tree(banner_gone("Inward"), "closed")
+        # A quick flick short of the distance, towards its edge, goes.
         nid = as_user(NOTIFY + "-p -t 20000 Flung body").strip()
         wait_for_tree(banner_shown("Flung"), "the banner")
         x = card + 60

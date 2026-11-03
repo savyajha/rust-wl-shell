@@ -291,22 +291,37 @@ impl Banners {
             }
         });
         card.add_controller(hover);
-        // The banner follows a swipe sideways, as far as its anchored edge lets it.
+        // The banner follows a swipe sideways, and goes out off the output past its
+        // anchored edge only (with niri's shadow: no fade, which would leave it); one with
+        // neither edge fades out where it is, either way.
         let (gap, swiped) = (self.gap, self.swipe);
         let moved = glib::clone!(
             #[weak]
             window,
-            move |dx: f64| {
-                window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(1.0));
+            move |dx: f64| match horizontal {
+                Some(Edge::Right) => window.set_margin(Edge::Right, gap - dx as i32),
+                Some(edge) => window.set_margin(edge, gap + dx as i32),
+                None => window.set_opacity(1.0 - (dx.abs() / (2.0 * swiped)).min(1.0)),
+            }
+        );
+        // Off the output: as wide as it is now (more than `width` for a long word), and its
+        // gap.
+        let out = glib::clone!(
+            #[weak]
+            window,
+            #[upgrade_or]
+            (0.0, 0.0),
+            move || {
+                let off = f64::from(window.width() + gap).max(2.0 * swiped);
                 match horizontal {
-                    Some(Edge::Right) => window.set_margin(Edge::Right, gap - dx as i32),
-                    Some(edge) => window.set_margin(edge, gap + dx as i32),
-                    None => {}
+                    Some(Edge::Right) => (0.0, off),
+                    Some(_) => (off, 0.0),
+                    None => (2.0 * swiped, 2.0 * swiped),
                 }
             }
         );
         let dismissed = requests.clone();
-        swipe(&card, self.swipe, moved, move || {
+        swipe(&card, self.swipe, out, moved, move || {
             let _ = dismissed.send(Request::Dismiss(id));
         });
         if n.actions.iter().any(|(key, _)| key == "default") {
@@ -587,15 +602,19 @@ fn ago(time: u64) -> String {
 
 /// A horizontal swipe on `widget`, by a drag or by a two-finger touchpad scroll: `moved`
 /// with its offset as it goes, and on its end: on out past `distance`, or when flung
-/// that way, and then `swiped`; back to 0 otherwise.
+/// that way, to `out`'s offset that way (left, right; 0: not that way), and then
+/// `swiped`; back to 0 otherwise. It follows as far as that offset, or `distance` if
+/// more.
 pub fn swipe(
     widget: &impl IsA<gtk::Widget>,
     distance: f64,
+    out: impl Fn() -> (f64, f64) + 'static,
     moved: impl Fn(f64) + 'static,
     swiped: impl Fn() + 'static,
 ) {
     let swipe = Rc::new(Swipe {
         distance,
+        out: Box::new(out),
         moved: Box::new(moved),
         swiped: Box::new(swiped),
         at: Cell::new(0.0),
@@ -637,7 +656,7 @@ pub fn swipe(
             _ => (1.0, Some(scroll.current_event_time())),
         };
         s.to(s.at.get() - dx * step, time);
-        if s.at.get().abs() > distance {
+        if s.at.get().abs() > distance && s.out() != 0.0 {
             s.end(None);
         } else {
             let (turn, quiet) = (s.turn.get(), Rc::downgrade(&s));
@@ -681,6 +700,7 @@ pub const STEP: Duration = Duration::from_millis(8);
 /// A swipe's state: what `swipe` shares between its controllers and timers.
 struct Swipe {
     distance: f64,
+    out: Box<dyn Fn() -> (f64, f64)>,
     moved: Box<dyn Fn(f64)>,
     swiped: Box<dyn Fn()>,
     /// The offset shown.
@@ -706,6 +726,8 @@ impl Swipe {
         if self.state.get() == State::Out {
             return;
         }
+        let (left, right) = (self.out)();
+        let at = at.clamp(-left.max(self.distance), right.max(self.distance));
         self.turn.set(self.turn.get() + 1);
         self.state.set(State::Moving);
         self.at.set(at);
@@ -713,6 +735,19 @@ impl Swipe {
             self.recent.borrow_mut().push((time, at));
         }
         (self.moved)(at);
+    }
+
+    /// Where it goes out the way it is (0: not that way, or at rest).
+    fn out(&self) -> f64 {
+        let at = self.at.get();
+        let (left, right) = (self.out)();
+        if at > 0.0 {
+            right
+        } else if at < 0.0 {
+            -left
+        } else {
+            0.0
+        }
     }
 
     /// Its end, let go at `time` (`None`: no speed): out, or back.
@@ -737,10 +772,9 @@ impl Swipe {
         };
         let at = self.at.get();
         let flung = speed.abs() > FLING && speed.signum() == at.signum();
-        if at.abs() > self.distance || (at != 0.0 && flung) {
-            // Far enough for the card to have faded out.
+        if self.out() != 0.0 && (at.abs() > self.distance || flung) {
             self.state.set(State::Out);
-            self.animate(at.signum() * 2.0 * self.distance);
+            self.animate(self.out());
         } else if at != 0.0 {
             self.animate(0.0);
         }

@@ -341,18 +341,23 @@ In the UI (`notifications.rs`, `clock.rs`):
   launch context (xdg-activation, niri's), so the app may raise its window.
 - a swipe (`notifications::swipe`): a horizontal `GtkGestureDrag`, or a two-finger
   horizontal scroll (`GtkEventControllerScroll`; a wheel's steps count 40 px). The
-  banner follows it by its margin on its anchored side and fades; history rows swipe
-  the same way, shifted by their margins. The drag is measured in its surface's
-  coordinates, not the card's: niri keeps a surface where it was pressed until the
-  release, so these are the pointer's own moves. A swipe ends on the drag's end or
-  cancel, the scroll's end, the pointer leaving the card while scrolling (a banner slid
-  from under a still pointer gets a `wl_pointer.leave`, and the scroll's end then goes
-  to whatever is under it), or 150 ms without a scroll (a wheel sends no end); a second
-  end does nothing. On its end it goes on out past `swipe-distance` (100 px), or when
-  released faster than 600 px/s that way (over its last 100 ms of moves, by the events'
-  times; a wheel's steps have no speed), easing out over 160 ms to twice the distance,
-  faded out, and is dismissed; short of both it eases back as long. Both run on a
-  GLib timer, as the Centre's slide; a new swipe stops the way back.
+  banner follows it by its margin on its anchored side, without fading (niri draws its
+  shadow, which a fade would leave behind); a banner with neither side anchored (top or
+  bottom centre) stays and fades instead. History rows follow it by their margins and
+  fade (the shadow is the panel's). The drag is measured in its surface's coordinates,
+  not the card's: niri keeps a surface where it was pressed until the release, so these
+  are the pointer's own moves. A swipe ends on the drag's end or cancel, the scroll's
+  end, the pointer leaving the card while scrolling (a banner slid from under a still
+  pointer gets a `wl_pointer.leave`, and the scroll's end then goes to whatever is
+  under it), or 150 ms without a scroll (a wheel sends no end); a second end does
+  nothing. On its end it goes out past `swipe-distance` (100 px), or when released
+  faster than 600 px/s that way (over its last 100 ms of moves, by the events' times; a
+  wheel's steps have no speed), and is dismissed; short of both it goes back. A banner
+  goes out only towards its anchored edge, off the output (its width and gap, at
+  least twice the distance), as macOS's; inwards it always goes back. A centred banner
+  and a history row go out either way, to twice the distance, faded out. Both ease
+  out over 160 ms on a GLib timer, as the Centre's slide; a new swipe stops the way
+  back.
 - known limits: the name is claimed once, at start (another server leaving it later is
   not noticed); the banners stack by their heights as measured on the focused output,
   so a banner shown on another output (the focus moved) can leave a gap; the `resident`

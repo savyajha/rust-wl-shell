@@ -234,9 +234,17 @@ impl Centre {
         let card = content(n, self.requests.clone(), None, true);
         let moved = follow_swipe(&card, self.swipe);
         let (requests, id) = (self.requests.clone(), n.id);
-        swipe(&card, self.swipe, moved, move || {
-            let _ = requests.send(Request::Dismiss(id));
-        });
+        // Out either way, as far as it has faded out.
+        let out = 2.0 * self.swipe;
+        swipe(
+            &card,
+            self.swipe,
+            move || (out, out),
+            moved,
+            move || {
+                let _ = requests.send(Request::Dismiss(id));
+            },
+        );
         if n.actions.iter().any(|(key, _)| key == "default") {
             let click = gtk::GestureClick::new();
             let (requests, centre) = (self.requests.clone(), Rc::downgrade(self));
